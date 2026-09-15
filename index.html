@@ -138,6 +138,7 @@ textarea{min-height:100px}
 .modal-box{background:#fff;padding:24px;border-radius:6px;max-width:380px;width:92%;border-top:4px solid var(--amber)}
 .modal-box h3{margin-bottom:4px}
 .modal-box .err{color:var(--danger);font-size:.85rem;min-height:18px}
+.modal-box.modal-wide{max-width:640px}
 
 /* proforma */
 fieldset{border:1px solid var(--line);border-radius:4px;padding:14px 16px 16px;margin-bottom:16px}
@@ -150,6 +151,8 @@ legend{font-family:'Barlow Condensed';font-weight:600;color:var(--navy);padding:
 .pf-totals td:last-child{text-align:right;font-family:'IBM Plex Mono'}
 .pf-grand td{background:var(--navy) !important;color:#fff !important;font-weight:700 !important}
 .pf-words{margin-top:8px;font-style:italic;color:var(--steel)}
+.add-product-panel{background:#fff;border:1px solid var(--line);border-radius:4px;padding:14px;margin-bottom:14px}
+.add-product-panel .search-bar{margin:0 0 10px}
 
 @media(max-width:760px){
   .hero-section h1{font-size:2.1rem}
@@ -229,7 +232,7 @@ legend{font-family:'Barlow Condensed';font-weight:600;color:var(--navy);padding:
   <section id="products" style="display:none">
     <h2>Products</h2>
     <div class="search-bar">
-      <input id="searchInput" placeholder="Search by item code, name or category..." onkeydown="if(event.key==='Enter')performSearch()"/>
+      <input id="searchInput" placeholder="Search by item code, name or category..." oninput="performSearch()" onkeydown="if(event.key==='Enter')performSearch()"/>
       <button onclick="performSearch()">Search</button>
     </div>
     <div id="breadcrumb"></div>
@@ -271,6 +274,14 @@ legend{font-family:'Barlow Condensed';font-weight:600;color:var(--navy);padding:
   <section id="cart" style="display:none">
     <h2>Cart</h2>
     <div class="note" id="cart-note">Get a special quote for the products below.</div>
+    <div id="cart-add-product-panel" class="add-product-panel" style="display:none">
+      <div class="search-bar">
+        <input id="cartSearchInput" placeholder="Search by item code, name or category..." oninput="performCartSearch()" onkeydown="if(event.key==='Enter')performCartSearch()"/>
+        <button onclick="performCartSearch()">Search</button>
+      </div>
+      <div id="cart-search-results"></div>
+      <p style="font-size:.82rem;color:var(--steel);margin:10px 0 0">Can't find it in our catalogue? <a href="#" onclick="event.preventDefault();openCustomItemModal()">Add an item that's not listed</a>.</p>
+    </div>
     <div id="cart-contents"></div>
     <div class="actions" id="cart-actions"></div>
   </section>
@@ -357,8 +368,17 @@ legend{font-family:'Barlow Condensed';font-weight:600;color:var(--navy);padding:
       <fieldset>
         <legend>Line Items</legend>
         <div class="actions" style="margin-top:0;margin-bottom:10px">
-          <button class="btn-sm btn-ghost" onclick="syncProformaFromCart()">↺ Sync from Admin Cart</button>
+          <button class="btn-sm btn-ghost" onclick="syncProformaFromCart()">↺ Replace with Admin Cart</button>
+          <button class="btn-sm btn-ghost" onclick="mergeProformaFromCart()">+ Merge from Admin Cart</button>
+          <button class="btn-sm btn-ghost" onclick="toggleProformaAddPanel()">+ Add Product</button>
           <button class="btn-sm btn-ghost" onclick="addBlankProformaRow()">+ Add Blank Row</button>
+        </div>
+        <div id="pf-add-product-panel" class="add-product-panel" style="display:none">
+          <div class="search-bar">
+            <input id="pfSearchInput" placeholder="Search by item code, name or category..." oninput="performProformaSearch()" onkeydown="if(event.key==='Enter')performProformaSearch()"/>
+            <button onclick="performProformaSearch()">Search</button>
+          </div>
+          <div id="pf-search-results"></div>
         </div>
         <div id="pf-items-wrap"></div>
         <div class="pf-totals" id="pf-totals"></div>
@@ -449,6 +469,30 @@ legend{font-family:'Barlow Condensed';font-weight:600;color:var(--navy);padding:
   </div>
 </div>
 
+<!-- Custom (not in catalogue) item modal -->
+<div id="custom-item-modal" class="modal-overlay">
+  <div class="modal-box">
+    <h3>Add an Item Not in Our Catalogue</h3>
+    <p style="font-size:.85rem;color:var(--steel);margin-top:0">Describe what you need — we'll quote it for you.</p>
+    <div class="col" style="margin-bottom:8px"><label>Item Name *</label><input id="ci-name"/></div>
+    <div class="col" style="margin-bottom:8px"><label>Description</label><textarea id="ci-desc" placeholder="Size, material, specification, etc."></textarea></div>
+    <div class="form-row">
+      <div class="col"><label>Quantity *</label><input id="ci-qty" type="number" min="1" value="1"/></div>
+      <div class="col"><label>Unit</label><input id="ci-unit" value="Pcs" placeholder="Pcs / Dozen / Set..."/></div>
+    </div>
+    <div class="form-row">
+      <div class="col"><label>Variant Code (optional)</label><input id="ci-variant" placeholder="e.g. V1"/></div>
+      <div class="col"><label>HSN Code (optional)</label><input id="ci-hsn"/></div>
+      <div class="col"><label>GST % (optional)</label><input id="ci-gst" type="number" min="0" step="0.01"/></div>
+    </div>
+    <div class="err" id="ci-err"></div>
+    <div class="actions" style="justify-content:flex-end">
+      <button class="btn-ghost btn-sm" onclick="closeCustomItemModal()">Cancel</button>
+      <button class="btn btn-sm" onclick="confirmCustomItem()">Add to Cart</button>
+    </div>
+  </div>
+</div>
+
 <!-- Customer cart enquiry modal -->
 <div id="cart-modal" class="modal-overlay">
   <div class="modal-box">
@@ -511,6 +555,7 @@ let role = sessionStorage.getItem('sni_role') || 'customer';
 let adminUsername = sessionStorage.getItem('sni_admin_user') || '';
 let proformaItems = []; // working line items for the proforma builder
 let pendingCartItem = null; // item awaiting quantity confirmation in the Add to Cart modal
+let pfSearchMatches = []; // last set of catalogue search results shown in the Proforma "Add Product" panel
 
 /* ================= DATA LOAD ================= */
 function cleanPrice(raw){ if(!raw) return 0; const n = parseFloat(String(raw).replace(/[^0-9.]/g,'')); return isNaN(n)?0:n; }
@@ -518,7 +563,10 @@ function cleanGST(raw){ if(!raw) return 0; const n = parseFloat(String(raw).repl
 function formatINR(n){ return '₹'+(Number(n)||0).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2}); }
 // jsPDF's built-in fonts don't have the ₹ glyph (it prints as a broken character), so PDFs use "Rs." instead.
 function formatINRPdf(n){ return 'Rs. '+(Number(n)||0).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2}); }
-function formatPct(n){ n = Math.round((Number(n)||0)*100)/100; return n===0 ? '-' : (n+'%'); }
+// applicable=false means this tax type doesn't apply to this shipment at all (e.g. IGST on an
+// intra-state sale, or any GST on an export) so we show "-"; applicable=true means the tax type
+// DOES apply, so we always show the rate even when it happens to be a genuine 0% product.
+function formatPct(n, applicable){ if(applicable===false) return '-'; n = Math.round((Number(n)||0)*100)/100; return n+'%'; }
 function showToast(msg,isError){
   const el = document.createElement('div');
   el.textContent = msg;
@@ -696,7 +744,14 @@ function renderBreadcrumb(level){
   const breadcrumb = document.getElementById('breadcrumb');
   let html = '';
   if(level==='category') html = `<button class="back-btn" onclick="renderCategories()">⬅ Back to Categories</button>`;
-  else if(level==='item') html = `<button class="back-btn" onclick="renderItems('${currentCategory.replace(/'/g,"\\'")}')">⬅ Back to ${currentCategory}</button>`;
+  else if(level==='item'){
+    // Guard against currentCategory being null (e.g. item opened from search
+    // results, or from a code shared with multiple categories) — calling
+    // .replace() on null was throwing a TypeError and breaking this click.
+    if(currentSearchResults) html = `<button class="back-btn" onclick="reopenSearchResults()">⬅ Back to Search Results</button>`;
+    else if(currentCategory) html = `<button class="back-btn" onclick="renderItems('${currentCategory.replace(/'/g,"\\'")}')">⬅ Back to ${currentCategory}</button>`;
+    else html = `<button class="back-btn" onclick="renderCategories()">⬅ Back to Categories</button>`;
+  }
   else if(level==='search') html = `<button class="back-btn" onclick="clearSearch()">⬅ Back to Home</button>`;
   breadcrumb.innerHTML = html;
 }
@@ -717,7 +772,7 @@ function renderCategories(){
   });
 }
 function renderItems(category){
-  currentCategory=category; renderBreadcrumb('category');
+  currentCategory=category; currentItemCode=null; currentSearchResults=null; renderBreadcrumb('category');
   const container = document.getElementById('catalogue');
   container.innerHTML = `<h2 style="margin-top:14px">${category}</h2><div class="grid"></div>`;
   const grid = container.querySelector('.grid');
@@ -784,6 +839,7 @@ function confirmAddToCart(){
   if(!pendingCartItem) { closeAddToCartModal(); return; }
   addToCart({ ...pendingCartItem, qty });
   closeAddToCartModal();
+  refreshCartIfVisible();
 }
 
 /* ================= CART (role-split) ================= */
@@ -792,6 +848,13 @@ function getCart(){ try{ return JSON.parse(localStorage.getItem(cartKey())||'[]'
 function saveCart(cart){ localStorage.setItem(cartKey(), JSON.stringify(cart)); updateCartCount(); }
 function updateCartCount(){ const n=getCart().reduce((s,i)=>s+Number(i.qty||0),0); document.getElementById('cart-count').innerText=n; }
 updateCartCount();
+
+// Re-renders the cart list in place when the Cart section is already the one
+// on screen (e.g. adding a product from the in-cart search panel), so newly
+// added items show up immediately instead of only after navigating away and back.
+function refreshCartIfVisible(){
+  if(document.getElementById('cart').style.display==='block') renderCart(true);
+}
 
 function addToCart(item){
   const cart = getCart();
@@ -810,23 +873,107 @@ function addToCart(item){
   showToast('Added to cart');
 }
 
-function renderCart(){
+/* ---- "Add Product" search panel inside the Cart section (customer & admin) ---- */
+function toggleCartAddPanel(){
+  const panel = document.getElementById('cart-add-product-panel');
+  const opening = panel.style.display==='none' || !panel.style.display;
+  panel.style.display = opening ? 'block' : 'none';
+  if(opening){
+    document.getElementById('cartSearchInput').value='';
+    document.getElementById('cart-search-results').innerHTML='';
+    document.getElementById('cartSearchInput').focus();
+  }
+}
+function performCartSearch(){
+  const query = document.getElementById('cartSearchInput').value.trim().toLowerCase();
+  const results = document.getElementById('cart-search-results');
+  if(!query){ results.innerHTML=''; return; }
+  const matches = allData.filter(r=>
+    (r['Item Code']||'').toLowerCase().includes(query) ||
+    (r['Item Name']||'').toLowerCase().includes(query) ||
+    (r['Category']||'').toLowerCase().includes(query) ||
+    (r['Variant Code']||'').toLowerCase().includes(query)
+  );
+  if(matches.length===0){ results.innerHTML='<p>No matching products found in our catalogue.</p>'; return; }
+  const isAdmin = role==='admin';
+  const shown = matches.slice(0,50);
+  let html = `<table class="data-table"><tr><th>Item</th><th>Variant</th><th>Description</th>${isAdmin?'<th>Price</th><th>GST</th>':''}<th>Unit</th><th></th></tr>`;
+  shown.forEach(entry=>{
+    const priceNum = entry['_price'];
+    html += `<tr>
+      <td>${entry['Item Name']||''}<div class="meta">${entry['Item Code']||''}</div></td>
+      <td>${entry['Variant Code']||''}</td>
+      <td>${entry['Description']||''}</td>
+      ${isAdmin?`<td class="num price">${entry['Price/Unit']||''}</td><td class="num">${entry['GST']||0}%</td>`:''}
+      <td>${entry['Unit']||''}</td>
+      <td><button class="btn-sm btn" onclick="addToCartPrompt('${encodeURIComponent(entry['Item Code'])}','${encodeURIComponent(entry['Variant Code']||'')}','${encodeURIComponent(entry['Description']||'')}','${encodeURIComponent(String(priceNum))}','${encodeURIComponent(entry['HSN Code']||'')}','${encodeURIComponent(String(entry['_gst']))}')">Add</button></td>
+    </tr>`;
+  });
+  html += '</table>';
+  if(matches.length>shown.length) html += `<p style="font-size:.8rem;color:var(--steel)">Showing first ${shown.length} of ${matches.length} matches — refine your search for more.</p>`;
+  results.innerHTML = html;
+}
+
+/* ---- "Add an item not in our catalogue" (custom line item) ---- */
+function openCustomItemModal(){
+  document.getElementById('ci-name').value='';
+  document.getElementById('ci-desc').value='';
+  document.getElementById('ci-qty').value=1;
+  document.getElementById('ci-unit').value='Pcs';
+  document.getElementById('ci-variant').value='';
+  document.getElementById('ci-hsn').value='';
+  document.getElementById('ci-gst').value='';
+  document.getElementById('ci-err').innerText='';
+  document.getElementById('custom-item-modal').style.display='flex';
+}
+function closeCustomItemModal(){ document.getElementById('custom-item-modal').style.display='none'; }
+function confirmCustomItem(){
+  const name = document.getElementById('ci-name').value.trim();
+  const desc = document.getElementById('ci-desc').value.trim();
+  const qty = Number(document.getElementById('ci-qty').value);
+  const unit = document.getElementById('ci-unit').value.trim() || 'Pcs';
+  const variantCode = document.getElementById('ci-variant').value.trim() || 'Custom';
+  const hsn = document.getElementById('ci-hsn').value.trim();
+  const gst = Number(document.getElementById('ci-gst').value) || 0;
+  const errEl = document.getElementById('ci-err');
+  if(!name){ errEl.innerText='Please enter an item name.'; return; }
+  if(!qty || qty<=0 || !Number.isFinite(qty)){ errEl.innerText='Please enter a valid quantity.'; return; }
+  const cart = getCart();
+  cart.push({
+    itemCode:'CUSTOM-'+Date.now(), itemName:name, variantCode, description:desc,
+    unit, qty, img:'', originalPrice:0, manualPrice:0, hsn, gst, isCustom:true
+  });
+  saveCart(cart);
+  closeCustomItemModal();
+  showToast('Custom item added to cart');
+  refreshCartIfVisible();
+}
+
+function renderCart(keepPanelOpen){
   const container = document.getElementById('cart-contents');
   const actions = document.getElementById('cart-actions');
   const note = document.getElementById('cart-note');
   const cart = getCart(); updateCartCount();
+  // collapse the search panel whenever the cart is freshly opened via navigation
+  // (but not when we're just refreshing in place right after adding an item —
+  // that would annoyingly close the panel a user has open to add more items).
+  if(!keepPanelOpen){
+    const addPanel = document.getElementById('cart-add-product-panel');
+    if(addPanel) addPanel.style.display = 'none';
+  }
 
   if(role==='admin'){
     note.innerText = 'Build a proforma from the items below — edit the "Your Price" column before creating the invoice.';
-    if(cart.length===0){ container.innerHTML='<p>Your admin cart is empty.</p>'; actions.innerHTML=''; return; }
-    let html = `<table class="data-table cart-table"><tr><th>Image</th><th>Item</th><th>Variant</th><th>HSN</th><th>GST</th><th>Qty</th><th>Original Price</th><th>Your Price</th><th>Taxable Amt</th><th></th></tr>`;
+    const addBtn = `<button class="btn-ghost" onclick="toggleCartAddPanel()">+ Add Product</button>`;
+    if(cart.length===0){ container.innerHTML='<p>Your admin cart is empty.</p>'; actions.innerHTML=addBtn; return; }
+    let html = `<table class="data-table cart-table"><tr><th>Image</th><th>Variant</th><th>Item</th><th>HSN</th><th>GST</th><th>Qty</th><th>Original Price</th><th>Your Price</th><th>Taxable Amt</th><th></th></tr>`;
     cart.forEach((c,idx)=>{
       const img = c.img || 'https://via.placeholder.com/60?text='+encodeURIComponent(c.itemCode);
       const taxable = Number(c.qty)*Number(c.manualPrice||c.originalPrice||0);
       html += `<tr>
         <td><img src="${img}"/></td>
-        <td>${c.itemName||c.itemCode}<div class="meta">${c.description||''}</div></td>
         <td>${c.variantCode}</td>
+        <td>${c.itemName||c.itemCode}<div class="meta">${c.description||''}</div></td>
         <td class="num">${c.hsn||''}</td>
         <td class="num">${c.gst||0}%</td>
         <td><input type="number" min="1" class="qty-input" value="${c.qty}" onchange="updateCartField(${idx},'qty',this.value)"/></td>
@@ -839,26 +986,30 @@ function renderCart(){
     html += `</table>`;
     container.innerHTML = html;
     actions.innerHTML = `
+      ${addBtn}
       <button class="btn btn-amber" onclick="createProformaFromCart()">Create Proforma Invoice →</button>
       <button class="btn-ghost" onclick="clearCart()">Clear Cart</button>`;
   } else {
     note.innerText = 'Get a special quote for the products below.';
-    if(cart.length===0){ container.innerHTML='<p>Your cart is empty.</p>'; actions.innerHTML=''; return; }
-    let html = `<table class="data-table cart-table"><tr><th>Image</th><th>Item Name</th><th>Variant Code</th><th>Description</th><th>Qty</th><th></th></tr>`;
+    const addBtn = `<button class="btn-ghost" onclick="toggleCartAddPanel()">+ Add Product</button>`;
+    if(cart.length===0){ container.innerHTML='<p>Your cart is empty.</p>'; actions.innerHTML=addBtn; return; }
+    let html = `<table class="data-table cart-table"><tr><th>Image</th><th>Variant Code</th><th>Item Name</th><th>Description</th><th>Qty</th><th>Unit</th><th></th></tr>`;
     cart.forEach((c,idx)=>{
       const img = c.img || 'https://via.placeholder.com/60?text='+encodeURIComponent(c.itemCode);
       html += `<tr>
         <td><img src="${img}"/></td>
-        <td>${c.itemName||c.itemCode}</td>
         <td>${c.variantCode}</td>
+        <td>${c.itemName||c.itemCode}</td>
         <td>${c.description||''}</td>
         <td><input type="number" min="1" class="qty-input" value="${c.qty}" onchange="updateCartField(${idx},'qty',this.value)"/></td>
+        <td>${c.unit||''}</td>
         <td><button class="remove-x" onclick="removeCartItem(${idx})">✕</button></td>
       </tr>`;
     });
     html += `</table>`;
     container.innerHTML = html;
     actions.innerHTML = `
+      ${addBtn}
       <button class="btn" onclick="downloadCartPDF()">Download as PDF</button>
       <button class="btn btn-amber" onclick="openCartEnquiryModal()">Send Cart as Enquiry (WhatsApp)</button>
       <button class="btn-ghost" onclick="clearCart()">Clear Cart</button>`;
@@ -912,15 +1063,15 @@ async function downloadCartPDF(){
 
   const images = await Promise.all(cart.map(c=>loadImageAsDataURL(c.img)));
 
-  const tableColumn = ['Image','S.No.','Item','Variant','Description','Qty'];
-  const tableRows = cart.map((c,idx)=>['', idx+1, c.itemName||c.itemCode||'', c.variantCode||'', c.description||'', c.qty||'']);
+  const tableColumn = ['S.No.','Image','Item','Variant','Description','Qty','Unit'];
+  const tableRows = cart.map((c,idx)=>[idx+1, '', c.itemName||c.itemCode||'', c.variantCode||'', c.description||'', c.qty||'', c.unit||'']);
   doc.autoTable({
     startY:25, head:[tableColumn], body:tableRows, theme:'grid',
     headStyles:{ fillColor:[11,42,69], textColor:255, halign:'center' },
     styles:{ fontSize:10, cellPadding:3, minCellHeight:20 },
-    columnStyles:{ 0:{ cellWidth:22 } },
+    columnStyles:{ 0:{ cellWidth:14, halign:'center' }, 1:{ cellWidth:22 } },
     didDrawCell: function(data){
-      if(data.section==='body' && data.column.index===0){
+      if(data.section==='body' && data.column.index===1){
         const dataUrl = images[data.row.index];
         if(dataUrl){
           try{
@@ -945,7 +1096,7 @@ function sendCartEnquiry(){
   if(!name||!mobile||!city){ alert('Please enter Name, Mobile and City'); return; }
   const cart=getCart(); if(cart.length===0){ alert('Cart is empty'); return; }
   let msg = `Enquiry from ${name} (City: ${city||'N/A'})\nMobile: ${mobile}${email?('\nEmail: '+email):''}\n\nItems:`;
-  cart.forEach(c=>{ msg += `\n- ${c.itemName||c.itemCode} | Variant: ${c.variantCode} | Description: ${c.description} | Qty: ${c.qty}`; });
+  cart.forEach(c=>{ msg += `\n- ${c.itemName||c.itemCode} | Variant: ${c.variantCode} | Description: ${c.description} | Qty: ${c.qty} ${c.unit||''}`; });
   const wa = `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(msg)}`;
   if(SHEET_WEBHOOK){ try{ fetch(SHEET_WEBHOOK,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({type:'cart_enquiry',name,city,mobile,email,cart})}); }catch(e){ console.warn('sheet save failed',e); } }
   window.open(wa,'_blank'); closeCartModal();
@@ -968,8 +1119,9 @@ function sendEnquiry(){
 /* ================= GLOBAL SEARCH ================= */
 function performSearch(){
   const query = document.getElementById('searchInput').value.trim().toLowerCase();
-  if(!query) return;
+  if(!query){ renderCategories(); return; }
   currentSearchResults = allData.filter(r=> (r['Item Code']||'').toLowerCase().includes(query) || (r['Item Name']||'').toLowerCase().includes(query) || (r['Category']||'').toLowerCase().includes(query));
+  currentCategory = null; currentItemCode = null;
   renderBreadcrumb('search');
   const container = document.getElementById('catalogue');
   container.innerHTML = `<h2 style="margin-top:14px">Search Results for "${query}"</h2><div class="grid"></div>`;
@@ -985,7 +1137,8 @@ function performSearch(){
     grid.appendChild(div);
   });
 }
-function clearSearch(){ document.getElementById('searchInput').value=''; renderCategories(); }
+function clearSearch(){ document.getElementById('searchInput').value=''; currentSearchResults=null; renderCategories(); }
+function reopenSearchResults(){ performSearch(); }
 
 /* ================= PROFORMA BUILDER ================= */
 (function populateStateDropdown(){
@@ -1001,15 +1154,42 @@ function createProformaFromCart(){
   syncProformaFromCart();
   showSection('proforma');
 }
+// Builds the merged "Item / Variant / Description" text used in the proforma line item.
+function buildProformaDesc(itemName, variantCode, description){
+  let parts = [];
+  if(variantCode) parts.push(variantCode);
+  if(itemName) parts.push(itemName);
+  let text = parts.join(' - ');
+  if(description) text = text ? (text+' - '+description) : description;
+  return text;
+}
+// Fully REPLACES the current line items with a fresh copy of the admin cart.
 function syncProformaFromCart(){
   const cart = getCart();
   if(role!=='admin'){ return; }
   proformaItems = cart.map(c=>({
-    hsn: c.hsn||'', desc: (c.itemName?c.itemName+' - ':'')+(c.description||''),
+    hsn: c.hsn||'', desc: buildProformaDesc(c.itemName, c.variantCode, c.description),
     qty: Number(c.qty)||0, unit: c.unit||'Pcs', unitPrice: Number(c.manualPrice ?? c.originalPrice ?? 0),
     gst: Number(c.gst)||0
   }));
   renderProformaItems();
+  showToast('Line items replaced with admin cart');
+}
+// ADDS the admin cart's items on top of whatever is already in the proforma,
+// so existing manually-entered or edited rows are never wiped out.
+function mergeProformaFromCart(){
+  if(role!=='admin') return;
+  const cart = getCart();
+  if(cart.length===0){ showToast('Admin cart is empty',true); return; }
+  cart.forEach(c=>{
+    proformaItems.push({
+      hsn: c.hsn||'', desc: buildProformaDesc(c.itemName, c.variantCode, c.description),
+      qty: Number(c.qty)||0, unit: c.unit||'Pcs', unitPrice: Number(c.manualPrice ?? c.originalPrice ?? 0),
+      gst: Number(c.gst)||0
+    });
+  });
+  renderProformaItems();
+  showToast('Cart items merged into proforma');
 }
 function addBlankProformaRow(){
   proformaItems.push({ hsn:'', desc:'', qty:1, unit:'Pcs', unitPrice:0, gst:18 });
@@ -1019,6 +1199,56 @@ function removeProformaRow(i){ proformaItems.splice(i,1); renderProformaItems();
 function updateProformaField(i,field,val){
   if(['qty','unitPrice','gst'].includes(field)){ val=Number(val); if(isNaN(val)||val<0) val=0; }
   proformaItems[i][field]=val; renderProformaItems();
+}
+
+/* ---- "Add Product" search panel inside the Proforma builder ---- */
+function toggleProformaAddPanel(){
+  const panel = document.getElementById('pf-add-product-panel');
+  const opening = panel.style.display==='none' || !panel.style.display;
+  panel.style.display = opening ? 'block' : 'none';
+  if(opening){
+    document.getElementById('pfSearchInput').value='';
+    document.getElementById('pf-search-results').innerHTML='';
+    document.getElementById('pfSearchInput').focus();
+  }
+}
+function performProformaSearch(){
+  const query = document.getElementById('pfSearchInput').value.trim().toLowerCase();
+  const results = document.getElementById('pf-search-results');
+  if(!query){ results.innerHTML=''; pfSearchMatches=[]; return; }
+  const matches = allData.filter(r=>
+    (r['Item Code']||'').toLowerCase().includes(query) ||
+    (r['Item Name']||'').toLowerCase().includes(query) ||
+    (r['Category']||'').toLowerCase().includes(query) ||
+    (r['Variant Code']||'').toLowerCase().includes(query)
+  );
+  pfSearchMatches = matches.slice(0,50);
+  if(pfSearchMatches.length===0){ results.innerHTML='<p>No matching products found.</p>'; return; }
+  let html = `<table class="data-table"><tr><th>Item</th><th>Variant</th><th>Description</th><th>Price</th><th>GST</th><th>Unit</th><th></th></tr>`;
+  pfSearchMatches.forEach((entry,i)=>{
+    html += `<tr>
+      <td>${entry['Item Name']||''}<div class="meta">${entry['Item Code']||''}</div></td>
+      <td>${entry['Variant Code']||''}</td>
+      <td>${entry['Description']||''}</td>
+      <td class="num price">${entry['Price/Unit']||''}</td>
+      <td class="num">${entry['GST']||0}%</td>
+      <td>${entry['Unit']||''}</td>
+      <td><button class="btn-sm btn" onclick="addProformaItemFromSearch(${i})">Add</button></td>
+    </tr>`;
+  });
+  html += '</table>';
+  if(matches.length>pfSearchMatches.length) html += `<p style="font-size:.8rem;color:var(--steel)">Showing first ${pfSearchMatches.length} of ${matches.length} matches — refine your search for more.</p>`;
+  results.innerHTML = html;
+}
+function addProformaItemFromSearch(i){
+  const entry = pfSearchMatches[i];
+  if(!entry) return;
+  proformaItems.push({
+    hsn: entry['HSN Code']||'', desc: buildProformaDesc(entry['Item Name'], entry['Variant Code'], entry['Description']),
+    qty: 1, unit: entry['Unit']||'Pcs', unitPrice: entry['_price']||0, gst: entry['_gst']||0
+  });
+  renderProformaItems();
+  showToast('Item added to proforma');
 }
 
 function isExportShipment(){
@@ -1032,25 +1262,28 @@ function isSameStateAsHome(){
 function calcLine(item){
   const taxable = (Number(item.qty)||0) * (Number(item.unitPrice)||0);
   let cgst=0, sgst=0, igst=0, cgstPct=0, sgstPct=0, igstPct=0;
+  let cgstApplicable=false, sgstApplicable=false, igstApplicable=false;
   if(!isExportShipment()){
     if(isSameStateAsHome()){
       cgstPct = (Number(item.gst)||0)/2; sgstPct = (Number(item.gst)||0)/2;
       cgst = taxable*cgstPct/100; sgst = taxable*sgstPct/100;
+      cgstApplicable = true; sgstApplicable = true;
     } else {
       igstPct = Number(item.gst)||0;
       igst = taxable*igstPct/100;
+      igstApplicable = true;
     }
   }
   const total = taxable+cgst+sgst+igst;
-  return { taxable, cgst, sgst, igst, cgstPct, sgstPct, igstPct, total };
+  return { taxable, cgst, sgst, igst, cgstPct, sgstPct, igstPct, total, cgstApplicable, sgstApplicable, igstApplicable };
 }
 
 function renderProformaItems(){
   const wrap = document.getElementById('pf-items-wrap');
   if(proformaItems.length===0){
-    wrap.innerHTML = '<p style="color:var(--steel)">No line items yet — sync from your admin cart, or add a blank row.</p>';
+    wrap.innerHTML = '<p style="color:var(--steel)">No line items yet — sync from your admin cart, search &amp; add a product, or add a blank row.</p>';
   } else {
-    let html = `<table class="data-table pf-table"><tr><th>HSN</th><th>Item Code &amp; Description</th><th>Qty</th><th>Unit</th><th>Unit Price</th><th>GST%</th><th>Taxable</th><th>CGST</th><th>SGST</th><th>IGST</th><th>Total</th><th></th></tr>`;
+    let html = `<table class="data-table pf-table"><tr><th>HSN</th><th>Variant, Item &amp; Description</th><th>Qty</th><th>Unit</th><th>Unit Price</th><th>GST%</th><th>Taxable</th><th>CGST</th><th>SGST</th><th>IGST</th><th>Total</th><th></th></tr>`;
     proformaItems.forEach((item,i)=>{
       const c = calcLine(item);
       html += `<tr>
@@ -1061,9 +1294,9 @@ function renderProformaItems(){
         <td><input type="number" min="0" step="0.01" value="${item.unitPrice}" style="width:90px" onchange="updateProformaField(${i},'unitPrice',this.value)"/></td>
         <td><input type="number" min="0" step="0.01" value="${item.gst}" style="width:60px" onchange="updateProformaField(${i},'gst',this.value)"/></td>
         <td class="num price">${formatINR(c.taxable)}</td>
-        <td class="num price">${formatPct(c.cgstPct)}</td>
-        <td class="num price">${formatPct(c.sgstPct)}</td>
-        <td class="num price">${formatPct(c.igstPct)}</td>
+        <td class="num price">${formatPct(c.cgstPct, c.cgstApplicable)}</td>
+        <td class="num price">${formatPct(c.sgstPct, c.sgstApplicable)}</td>
+        <td class="num price">${formatPct(c.igstPct, c.igstApplicable)}</td>
         <td class="num price">${formatINR(c.total)}</td>
         <td><button class="remove-x" onclick="removeProformaRow(${i})">✕</button></td>
       </tr>`;
@@ -1129,6 +1362,26 @@ function amountInWords(num){
   if(thousand) parts.push(threeDigits(thousand)+' Thousand');
   if(rest) parts.push(threeDigits(rest));
   return 'Rupees '+parts.join(' ')+' Only';
+}
+
+/* ---- Page-break helper for the manually-drawn parts of the Proforma PDF ----
+   jspdf-autotable paginates the line-items table by itself, but everything
+   drawn with doc.rect()/doc.text() after it (totals bar, amount-in-words,
+   transport row, signatures) is placed at fixed coordinates and was
+   previously able to run off the bottom of the page. This checks the
+   remaining space first and starts a fresh page when there isn't enough.
+   PDF_TOP_GAP reserves room at the top of any newly-created page so that the
+   "PAGE n of N" header stamped in later never overlaps the first line of
+   content on that page. */
+const PDF_TOP_GAP = 16;
+function ensureSpace(doc, y, neededHeight, margin){
+  margin = margin==null ? 8 : margin;
+  const pageHeight = doc.internal.pageSize.getHeight();
+  if(y + neededHeight > pageHeight - margin){
+    doc.addPage();
+    return PDF_TOP_GAP;
+  }
+  return y;
 }
 
 /* ---- PDF generation matching the supplied PI layout ---- */
@@ -1231,32 +1484,141 @@ function generateProformaPDF(){
 
   y+=3;
 
-  // ---- Line items table ----
+  // ---- Line items table (paginated: per-page-only subtotals on every page
+  // except the last, and a Brought-Down (B/D) row carrying forward the
+  // running Total Units / Taxable Amount / Total Amount at the top of every
+  // continuation page). The grand total block further below still sums
+  // ALL items, unchanged. ----
   const t = proformaTotals();
-  const body = proformaItems.map((item,i)=>{
-    const c = calcLine(item);
-    return [i+1, item.hsn, item.desc, `${item.qty} ${item.unit}`, formatINRPdf(item.unitPrice),
-      formatINRPdf(c.taxable), formatPct(c.cgstPct), formatPct(c.sgstPct), formatPct(c.igstPct), formatINRPdf(c.total)];
-  });
-  doc.autoTable({
-    startY:y, margin:{left:M,right:M},
-    head:[['Sr.','HSN','Item Code & Description','Total Units','Unit Price','Taxable Amt','CGST','SGST','IGST','Total Amount']],
-    body,
-    theme:'grid',
-    styles:{ fontSize:7, cellPadding:2, lineColor:[90,113,132], lineWidth:0.1, overflow:'linebreak' },
-    headStyles:{ fillColor:[231,236,240], textColor:[11,42,69], fontStyle:'bold', fontSize:7 },
-    columnStyles:{0:{cellWidth:7,halign:'center'},1:{cellWidth:15},2:{cellWidth:'auto'},3:{cellWidth:16,halign:'center'},4:{cellWidth:22,halign:'right'},5:{cellWidth:26,halign:'right'},6:{cellWidth:12,halign:'center'},7:{cellWidth:12,halign:'center'},8:{cellWidth:12,halign:'center'},9:{cellWidth:26,halign:'right'}},
-    foot:[
-      ['','','','','Total Taxable Amount','','','','',formatINRPdf(t.taxable)],
-      ['','','','','CGST Amount','','','','',formatINRPdf(t.cgst)],
-      ['','','','','SGST Amount','','','','',formatINRPdf(t.sgst)],
-      ['','','','','IGST Amount','','','','',formatINRPdf(t.igst)],
-    ],
-    footStyles:{ fontStyle:'bold', textColor:[11,42,69], fillColor:[255,255,255], fontSize:7 },
-  });
-  y = doc.lastAutoTable.finalY+2;
+  const PF_COL_STYLES = {
+    0:{cellWidth:9,halign:'center'}, 1:{cellWidth:17}, 2:{cellWidth:56},
+    3:{cellWidth:14,halign:'center'}, 4:{cellWidth:19,halign:'right'}, 5:{cellWidth:22,halign:'right'},
+    6:{cellWidth:11,halign:'center'}, 7:{cellWidth:11,halign:'center'}, 8:{cellWidth:11,halign:'center'},
+    9:{cellWidth:24,halign:'right'}
+  };
+  const PF_HEAD = [['Sr.','HSN','Variant, Item & Description','Total Units','Unit Price','Taxable Amt','CGST','SGST','IGST','Total Amount']];
+  const PF_STYLES = { fontSize:7, cellPadding:2, lineColor:[90,113,132], lineWidth:0.1, overflow:'linebreak' };
+  const PF_HEAD_STYLES = { fillColor:[231,236,240], textColor:[11,42,69], fontStyle:'bold', fontSize:7 };
 
+  const pageHeight = doc.internal.pageSize.getHeight();
+  const PF_HEAD_H = 12, PF_BD_H = 9, PF_BOTTOM_MARGIN = 10, PF_SUBTOTAL_H = 34, PF_FINAL_FOOTER_H = 78;
+
+  // Estimate each item row's printed height (used only to decide page breaks),
+  // based on how many lines the HSN / Description text will wrap to at these
+  // column widths, matching the fontSize/cellPadding used by the real table.
+  doc.setFontSize(7); doc.setFont(undefined,'normal');
+  function pfEstimateRowHeight(item){
+    const lineH = 7*0.3527*1.15;
+    const hsnLines = doc.splitTextToSize(String(item.hsn||''), PF_COL_STYLES[1].cellWidth-3).length;
+    const descLines = doc.splitTextToSize(String(item.desc||''), PF_COL_STYLES[2].cellWidth-3).length;
+    const lines = Math.max(1, hsnLines, descLines);
+    return 4 + lines*lineH;
+  }
+  const rowHeights = proformaItems.map(pfEstimateRowHeight);
+
+  // ---- Pass 1: greedily fill pages, reserving room for a small per-page subtotal ----
+  const chunkPlans = [];
+  { let idx=0;
+    while(idx < proformaItems.length){
+      const isCont = chunkPlans.length>0;
+      const startY = isCont ? PDF_TOP_GAP : y;
+      const avail = pageHeight - startY - PF_HEAD_H - PF_BOTTOM_MARGIN - PF_SUBTOTAL_H - (isCont?PF_BD_H:0);
+      let used=0, items=[], startIdx=idx;
+      while(idx < proformaItems.length){
+        const h = rowHeights[idx];
+        if(used+h > avail && items.length>0) break;
+        used += h; items.push(proformaItems[idx]); idx++;
+      }
+      chunkPlans.push({ items, startIdx, startY, isCont });
+    }
+  }
+  // ---- Pass 2: the LAST page needs room for the full totals/words/declaration/
+  // transport/signature block (much taller than the small per-page subtotal),
+  // so push items off the end of the last chunk onto a fresh page until what
+  // remains actually fits. ----
+  function pfChunkHeight(chunk){
+    let h = chunk.startY + PF_HEAD_H + (chunk.isCont?PF_BD_H:0);
+    chunk.items.forEach((_,i)=> h += rowHeights[chunk.startIdx+i]);
+    return h;
+  }
+  while(chunkPlans.length){
+    const last = chunkPlans[chunkPlans.length-1];
+    if(last.items.length===0) break;
+    const remaining = pageHeight - PF_BOTTOM_MARGIN - pfChunkHeight(last);
+    if(remaining >= PF_FINAL_FOOTER_H) break;
+    const movedItem = last.items.pop();
+    const movedIdx = last.startIdx + last.items.length;
+    chunkPlans.push({ items:[movedItem], startIdx:movedIdx, startY:PDF_TOP_GAP, isCont:true });
+  }
+
+  // Drop any chunk that ended up with zero items (can happen in the rare
+  // edge case where pass 2 has to move every item off a page) so we never
+  // render a blank page.
+  const finalChunks = chunkPlans.filter(c=>c.items.length>0);
+
+  // ---- Render each page's chunk ----
+  let cumQty=0, cumTaxable=0, cumTotal=0, globalIdx=0;
+  finalChunks.forEach((chunk,ci)=>{
+    if(ci>0) doc.addPage();
+    const bodyRows = [];
+    if(chunk.isCont){
+      bodyRows.push([
+        { content:'B/D', styles:{fontStyle:'italic'} }, '',
+        { content:'Brought Down from previous page', styles:{fontStyle:'italic'} },
+        String(cumQty), '', formatINRPdf(cumTaxable), '', '', '', formatINRPdf(cumTotal)
+      ]);
+    }
+    chunk.items.forEach(item=>{
+      globalIdx++;
+      const c = calcLine(item);
+      bodyRows.push([ globalIdx, item.hsn, item.desc, `${item.qty} ${item.unit}`, formatINRPdf(item.unitPrice),
+        formatINRPdf(c.taxable), formatPct(c.cgstPct,c.cgstApplicable), formatPct(c.sgstPct,c.sgstApplicable), formatPct(c.igstPct,c.igstApplicable), formatINRPdf(c.total) ]);
+    });
+    doc.autoTable({
+      startY: chunk.startY, margin:{left:M,right:M,top:PDF_TOP_GAP,bottom:16},
+      head: PF_HEAD, body: bodyRows, theme:'grid',
+      styles: PF_STYLES, headStyles: PF_HEAD_STYLES, columnStyles: PF_COL_STYLES,
+      didParseCell:function(data){
+        if(data.section==='body' && data.row.index===0 && chunk.isCont){
+          data.cell.styles.fillColor=[247,240,225]; data.cell.styles.textColor=[90,113,132];
+        }
+      }
+    });
+
+    const pageTotals = chunk.items.reduce((acc,item)=>{
+      const c=calcLine(item);
+      acc.taxable+=c.taxable; acc.cgst+=c.cgst; acc.sgst+=c.sgst; acc.igst+=c.igst; acc.total+=c.total;
+      return acc;
+    },{taxable:0,cgst:0,sgst:0,igst:0,total:0});
+    const isLast = ci===finalChunks.length-1;
+
+    if(!isLast){
+      // Per-page-only subtotal — NOT the running/grand total — carried
+      // forward via the B/D row at the top of the next page instead.
+      doc.autoTable({
+        startY: doc.lastAutoTable.finalY, margin:{left:M,right:M},
+        body:[
+          [{content:'Total Taxable Amount (this page)', colSpan:9, styles:{halign:'right'}}, formatINRPdf(pageTotals.taxable)],
+          [{content:'CGST Amount (this page)', colSpan:9, styles:{halign:'right'}}, formatINRPdf(pageTotals.cgst)],
+          [{content:'SGST Amount (this page)', colSpan:9, styles:{halign:'right'}}, formatINRPdf(pageTotals.sgst)],
+          [{content:'IGST Amount (this page)', colSpan:9, styles:{halign:'right'}}, formatINRPdf(pageTotals.igst)],
+          [{content:'Total Amount Carried Forward (C/F)', colSpan:9, styles:{halign:'right',fontStyle:'bold'}}, {content:formatINRPdf(pageTotals.total), styles:{fontStyle:'bold'}}],
+        ],
+        theme:'grid', styles:{ fontSize:7, cellPadding:{top:0.8,right:2,bottom:0.8,left:2}, lineColor:[90,113,132], lineWidth:0.1 },
+        columnStyles: PF_COL_STYLES,
+        didParseCell:function(data){ data.cell.styles.fillColor=[231,236,240]; if(data.column.index===9){ data.cell.styles.textColor=[11,42,69]; } }
+      });
+      cumQty += chunk.items.reduce((s,it)=>s+(Number(it.qty)||0),0);
+      cumTaxable += pageTotals.taxable; cumTotal += pageTotals.total;
+    }
+    y = doc.lastAutoTable.finalY + 2;
+  });
+
+  // Everything below here is drawn manually (not by autoTable) so it needs its
+  // own page-break checks — otherwise a long item list pushes this content
+  // past the bottom edge of the page and it gets cut off.
   const rounded = Math.round(t.total);
+  y = ensureSpace(doc, y, 10);
   doc.setFillColor(217,143,30); doc.rect(M,y,CW,7,'F');
   doc.setTextColor(255,255,255); doc.setFontSize(9); doc.setFont(undefined,'bold');
   doc.text('TOTAL AMOUNT ('+(document.getElementById('pf-currency').value||'INR')+', Round off)', M+2, y+4.8);
@@ -1264,16 +1626,19 @@ function generateProformaPDF(){
   doc.setFont(undefined,'normal'); doc.setTextColor(22,35,46);
   y+=10;
 
+  y = ensureSpace(doc, y, 12);
   doc.setFontSize(6.5); doc.setTextColor(90,113,132); doc.text('AMOUNT CHARGEABLE IN WORDS',M+1,y);
   doc.setFontSize(8); doc.setTextColor(22,35,46);
   doc.text(amountInWords(rounded), M+1, y+4.5,{maxWidth:CW-2});
   y+=10;
 
+  y = ensureSpace(doc, y, 8);
   doc.setFontSize(7); doc.setTextColor(90,113,132);
   doc.text('We declare that this invoice shows the actual price of the goods described and that all particulars are true and correct.', M+1, y);
   y+=5;
 
   // ---- Transport row ----
+  y = ensureSpace(doc, y, 10);
   y = fieldRow(doc,M,CW,y,10,
     [['TRANSPORT',document.getElementById('pf-transport').value],
      ["TRANSPORTER'S ID",document.getElementById('pf-transport-id').value],
@@ -1281,6 +1646,7 @@ function generateProformaPDF(){
      ['GROSS WEIGHT',document.getElementById('pf-weight').value]]);
 
   y+=6;
+  y = ensureSpace(doc, y, 26);
   const sigW=CW/2;
   doc.setFontSize(8); doc.setTextColor(22,35,46);
   doc.text('For Customer', M+1, y);
@@ -1290,6 +1656,14 @@ function generateProformaPDF(){
   doc.setFontSize(7); doc.setTextColor(90,113,132);
   doc.text('Signature with Date and Stamp', M+1, y+22);
   doc.text('Authorised Signatory', M+sigW+1, y+22);
+
+  // Stamp the correct "PAGE n of N" on every page now that final count is known.
+  const pageCount = doc.internal.getNumberOfPages();
+  for(let p=1; p<=pageCount; p++){
+    doc.setPage(p);
+    doc.setFontSize(8); doc.setFont(undefined,'normal'); doc.setTextColor(22,35,46);
+    doc.text('PAGE '+p+' of '+pageCount, PW-M, M+4, {align:'right'});
+  }
 
   const fname = 'Proforma_Invoice_'+(document.getElementById('pf-no').value||'draft')+'.pdf';
   doc.save(fname);
