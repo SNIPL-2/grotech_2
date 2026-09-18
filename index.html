@@ -853,15 +853,14 @@ function renderItemDetail(itemCode){
       </tr>
       ${unique.map(entry=>{
         const priceNum = entry['_price'];
-        const priceDisp = entry['Price/Unit']||'';
         return `<tr>
           <td>${escapeHtml(entry['Variant Code']||'')}</td>
           <td>${escapeHtml(entry['Description']||'')}</td>
-          ${isAdmin?`<td class="num price">${escapeHtml(priceDisp)}</td><td class="num">${escapeHtml(entry['GST']||'')}</td>`:''}
+          ${isAdmin?`<td class="num price">${formatINR(priceNum)}</td><td class="num">${formatGstPct(entry['_gst'])}</td>`:''}
           <td>${escapeHtml(entry['Unit']||'')}</td>
           <td>${escapeHtml(entry['MOQ']||'')}</td>
           <td><button class="btn-sm btn" onclick="addToCartPrompt('${encodeURIComponent(itemCode)}','${encodeURIComponent(entry['Variant Code']||'')}','${encodeURIComponent(entry['Description']||'')}','${encodeURIComponent(String(priceNum))}','${encodeURIComponent(entry['HSN Code']||'')}','${encodeURIComponent(String(entry['_gst']))}')">Add</button></td>
-          <td><a class="wa-link" target="_blank" href="https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent('Hi, I\'m interested in this tool:\nItem: '+(first['Item Name']||'')+'\nVariant Code: '+(entry['Variant Code']||'')+'\nDescription: '+(entry['Description']||'')+(isAdmin?'\nPrice: '+priceDisp:''))}"><i class="fab fa-whatsapp"></i> Chat</a></td>
+          <td><a class="wa-link" target="_blank" href="https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent('Hi, I\'m interested in this tool:\nItem: '+(first['Item Name']||'')+'\nVariant Code: '+(entry['Variant Code']||'')+'\nDescription: '+(entry['Description']||'')+(isAdmin?'\nPrice: '+formatINR(priceNum):''))}"><i class="fab fa-whatsapp"></i> Chat</a></td>
         </tr>`;
       }).join('')}
     </table>
