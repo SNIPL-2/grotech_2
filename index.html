@@ -302,7 +302,7 @@ legend{font-family:'Barlow Condensed';font-weight:600;color:var(--navy);padding:
         <div class="form-row">
           <div class="col"><label>Buyer's Order No.</label><input id="pf-order-no"/></div>
           <div class="col"><label>Buyer's Order Date</label><input id="pf-order-date" type="date"/></div>
-          <div class="col"><label>Notify Party</label><input id="pf-notify"/></div>
+          <div class="col"><label>Notify Party</label><textarea id="pf-notify" style="min-height:70px"></textarea></div>
         </div>
       </fieldset>
 
@@ -313,7 +313,7 @@ legend{font-family:'Barlow Condensed';font-weight:600;color:var(--navy);padding:
           <div class="col"><label>GST No.</label><input id="pf-buyer-gst"/></div>
         </div>
         <div class="form-row">
-          <div class="col" style="flex:2"><label>Address</label><input id="pf-buyer-address"/></div>
+          <div class="col" style="flex:2"><label>Address</label><textarea id="pf-buyer-address" style="min-height:70px"></textarea></div>
           <div class="col"><label>State</label>
             <select id="pf-buyer-state"><option value="">Select state...</option></select>
           </div>
@@ -514,10 +514,10 @@ legend{font-family:'Barlow Condensed';font-weight:600;color:var(--navy);padding:
 
 <script>
 /* ================= CONFIGURATION ================= */
-const DATA_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQ6NvfwkfCNg4TC0jrlrfiqdXA4UyOGhDdm9cJs2tkJxKpqoDa2OjHulev5O6avSKhMGWAP6utFs-MD/pub?gid=0&single=true&output=csv";
-const IMAGE_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQ6NvfwkfCNg4TC0jrlrfiqdXA4UyOGhDdm9cJs2tkJxKpqoDa2OjHulev5O6avSKhMGWAP6utFs-MD/pub?gid=676833393&single=true&output=csv";
-const CATEGORY_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQ6NvfwkfCNg4TC0jrlrfiqdXA4UyOGhDdm9cJs2tkJxKpqoDa2OjHulev5O6avSKhMGWAP6utFs-MD/pub?gid=2136776722&single=true&output=csv";
-const SHEET_WEBHOOK = "https://script.google.com/macros/s/AKfycbwaPVWC09sCKQmeUCYfVUNUo12TUbCX1fH-xZ4iivB13cpWZZ-VO5-QqQ3KZG8Ittk/exec";
+const DATA_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vR3dl_5ljKG2NPHgKtXPJzhYxfqNfPfS1J_0kH0NksmzSaJ1mdEd5mlm1dHAl_pkU3C3bolYS0vYlX4/pub?gid=0&single=true&output=csv";
+const IMAGE_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vR3dl_5ljKG2NPHgKtXPJzhYxfqNfPfS1J_0kH0NksmzSaJ1mdEd5mlm1dHAl_pkU3C3bolYS0vYlX4/pub?gid=676833393&single=true&output=csv";
+const CATEGORY_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vR3dl_5ljKG2NPHgKtXPJzhYxfqNfPfS1J_0kH0NksmzSaJ1mdEd5mlm1dHAl_pkU3C3bolYS0vYlX4/pub?gid=2136776722&single=true&output=csv";
+const SHEET_WEBHOOK = "https://script.google.com/macros/s/AKfycbzdFBrDKndXuVPtYcuN-IL4_MJQHdbmx33X33glJVxJeMC0LFrf5tgaD_iruxngekmX/exec";
 const WHATSAPP_NUMBER = "917986297302"; // without +
 
 // Admin login, password changes and password resets are now verified by your
@@ -553,6 +553,7 @@ let allData = [], imageMap = {}, categoryImageMap = {};
 let currentCategory = null, currentItemCode = null, currentSearchResults = null;
 let role = sessionStorage.getItem('sni_role') || 'customer';
 let adminUsername = sessionStorage.getItem('sni_admin_user') || '';
+let adminToken = sessionStorage.getItem('sni_admin_token') || '';
 let proformaItems = []; // working line items for the proforma builder
 let pendingCartItem = null; // item awaiting quantity confirmation in the Add to Cart modal
 let pfSearchMatches = []; // last set of catalogue search results shown in the Proforma "Add Product" panel
@@ -574,6 +575,14 @@ function showToast(msg,isError){
   document.body.appendChild(el);
   setTimeout(()=>el.remove(), 2600);
 }
+// Escapes any string before it goes into an innerHTML template, so catalogue
+// text or free-text the visitor typed (custom cart items, etc.) can never be
+// interpreted as HTML/JS — e.g. a "requirement" of <img src=x onerror=...>
+// renders as harmless literal text instead of executing.
+function escapeHtml(str){
+  if(str===null||str===undefined) return '';
+  return String(str).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+}
 
 Promise.all([
   fetch(DATA_URL).then(r=>r.text()),
@@ -583,12 +592,18 @@ Promise.all([
   allData = Papa.parse(dataText,{header:true}).data.filter(r=>r["Item Code"] && r["Category"]);
   allData.forEach(r=>{
     if(r["Category"]) r["Category"] = r["Category"].trim();
-    r["_price"] = cleanPrice(r["Price/Unit"]);
-    r["_gst"] = cleanGST(r["GST"]);
+    // Price/Unit and GST are intentionally NOT read from this public CSV any
+    // more — that sheet is fetchable by anyone who opens devtools or grabs
+    // the URL from view-source, so it can never hold real pricing. They
+    // default to 0/blank here and are filled in ONLY for a verified admin
+    // session, via fetchAdminPrices() below.
+    r["_price"] = 0;
+    r["_gst"] = 0;
   });
   Papa.parse(imageText,{header:true}).data.forEach(r=>{ if(r["Item Code"] && r["Image URL"]) imageMap[r["Item Code"].trim()] = r["Image URL"]; });
   Papa.parse(categoryText,{header:true}).data.forEach(r=>{ if(r["Category"] && r["Image URL"]) categoryImageMap[r["Category"].trim()] = r["Image URL"]; });
   renderCategories();
+  if(role==='admin' && adminToken) fetchAdminPrices();
 }).catch(e=>{
   document.getElementById('catalogue').innerHTML =
     '<p style="color:#B23A2E">\u274c Failed to load product data.<br><small>'+(e&&e.message?e.message:e)+'</small><br><small>If you opened this file by double-clicking it (a file:// address in the browser bar), that is almost always the cause \u2014 browsers block this kind of request from local files. Host it on a real web server (even a free one like GitHub Pages, or your existing site\u2019s hosting) and it should load.</small></p>';
@@ -624,6 +639,31 @@ async function callAuthAPI(payload){
   });
   return res.json();
 }
+// Pulls Price/Unit + GST from the private "Prices" sheet tab, via the
+// session-token-gated 'get_price_data' backend action — this is the ONLY
+// place real pricing enters the page, and only after a verified admin login.
+async function fetchAdminPrices(){
+  if(!adminToken) return;
+  try{
+    const data = await callAuthAPI({ action:'get_price_data', token:adminToken });
+    if(!data || !data.success){
+      if(data && /session/i.test(data.message||'')){ logoutAdmin(); showToast('Session expired — please log in again', true); }
+      return;
+    }
+    const byKey = {};
+    data.prices.forEach(p=>{ byKey[p.itemCode+'|'+(p.variantCode||'')] = p; });
+    allData.forEach(r=>{
+      const match = byKey[r['Item Code']+'|'+(r['Variant Code']||'')];
+      if(match){
+        r['_price'] = cleanPrice(match.price);
+        r['_gst'] = cleanGST(match.gst);
+        r['Price/Unit'] = match.price;
+        r['GST'] = match.gst;
+      }
+    });
+    applyRoleUI();
+  }catch(e){ console.warn('Could not load admin price data', e); }
+}
 function applyRoleUI(){
   const zone = document.getElementById('role-zone');
   const pfNav = document.getElementById('nav-proforma');
@@ -658,9 +698,11 @@ async function submitAdminLogin(){
   try{
     const data = await callAuthAPI({ action:'admin_login', username:u, password:p });
     if(data && data.success){
-      role='admin'; adminUsername=u;
+      role='admin'; adminUsername=u; adminToken=data.token||'';
       sessionStorage.setItem('sni_role','admin'); sessionStorage.setItem('sni_admin_user',u);
+      sessionStorage.setItem('sni_admin_token', adminToken);
       closeAdminLogin(); applyRoleUI(); showToast('Logged in as admin');
+      fetchAdminPrices();
     } else {
       errEl.innerText = (data && data.message) || 'Incorrect username or password.';
     }
@@ -670,8 +712,13 @@ async function submitAdminLogin(){
   } finally { btn.disabled=false; }
 }
 function logoutAdmin(){
-  role='customer'; adminUsername='';
+  if(adminToken){ try{ callAuthAPI({ action:'admin_logout', token:adminToken }); }catch(e){} }
+  role='customer'; adminUsername=''; adminToken='';
+  // Wipe cached price/GST figures from memory along with the session — they
+  // were only ever populated for this admin session and shouldn't linger.
+  allData.forEach(r=>{ r['_price']=0; r['_gst']=0; delete r['Price/Unit']; delete r['GST']; });
   sessionStorage.setItem('sni_role','customer'); sessionStorage.removeItem('sni_admin_user');
+  sessionStorage.removeItem('sni_admin_token');
   applyRoleUI(); showSection('home');
 }
 applyRoleUI();
@@ -749,7 +796,7 @@ function renderBreadcrumb(level){
     // results, or from a code shared with multiple categories) — calling
     // .replace() on null was throwing a TypeError and breaking this click.
     if(currentSearchResults) html = `<button class="back-btn" onclick="reopenSearchResults()">⬅ Back to Search Results</button>`;
-    else if(currentCategory) html = `<button class="back-btn" onclick="renderItems('${currentCategory.replace(/'/g,"\\'")}')">⬅ Back to ${currentCategory}</button>`;
+    else if(currentCategory) html = `<button class="back-btn" onclick="renderItems('${currentCategory.replace(/'/g,"\\'")}')">⬅ Back to ${escapeHtml(currentCategory)}</button>`;
     else html = `<button class="back-btn" onclick="renderCategories()">⬅ Back to Categories</button>`;
   }
   else if(level==='search') html = `<button class="back-btn" onclick="clearSearch()">⬅ Back to Home</button>`;
@@ -766,7 +813,7 @@ function renderCategories(){
   categories.forEach(cat=>{
     const div = document.createElement('div'); div.className='card category-card';
     const catImg = categoryImageMap[cat] || 'https://via.placeholder.com/300x180?text='+encodeURIComponent(cat);
-    div.innerHTML = `<img src="${catImg}" alt="${cat}" class="card-image"/><div class="card-title">${cat}</div>`;
+    div.innerHTML = `<img src="${catImg}" alt="${escapeHtml(cat)}" class="card-image"/><div class="card-title">${escapeHtml(cat)}</div>`;
     div.onclick = ()=> renderItems(cat);
     grid.appendChild(div);
   });
@@ -774,14 +821,14 @@ function renderCategories(){
 function renderItems(category){
   currentCategory=category; currentItemCode=null; currentSearchResults=null; renderBreadcrumb('category');
   const container = document.getElementById('catalogue');
-  container.innerHTML = `<h2 style="margin-top:14px">${category}</h2><div class="grid"></div>`;
+  container.innerHTML = `<h2 style="margin-top:14px">${escapeHtml(category)}</h2><div class="grid"></div>`;
   const grid = container.querySelector('.grid');
   const items = [...new Set(allData.filter(r=>r['Category']===category).map(r=>r['Item Code']))];
   items.forEach(code=>{
     const div = document.createElement('div'); div.className='card';
     const img = imageMap[code] || 'https://via.placeholder.com/150?text='+encodeURIComponent(code);
     const item = allData.find(r=>r['Item Code']===code) || {};
-    div.innerHTML = `<img src="${img}" alt="${code}" class="card-image"/><div class="card-title">${item['Item Name']||''}</div><div class="card-code">${code}</div>`;
+    div.innerHTML = `<img src="${img}" alt="${escapeHtml(code)}" class="card-image"/><div class="card-title">${escapeHtml(item['Item Name']||'')}</div><div class="card-code">${escapeHtml(code)}</div>`;
     div.onclick = ()=> renderItemDetail(code);
     grid.appendChild(div);
   });
@@ -796,10 +843,10 @@ function renderItemDetail(itemCode){
   const container = document.getElementById('catalogue');
   const unique = entries.reduce((u,e)=>{ if(!u.some(x=>x['Variant Code']===e['Variant Code'])) u.push(e); return u; },[]);
   container.innerHTML = `
-    <h2 style="margin-top:14px">${first['Item Name']||''}</h2>
-    <p class="meta">Item Code: ${first['Item Code']||''} · HSN: ${first['HSN Code']||''}</p>
-    <img src="${img}" alt="${itemCode}" class="detail-image"/>
-    <p><em>${first['Specs']||''}</em></p>
+    <h2 style="margin-top:14px">${escapeHtml(first['Item Name']||'')}</h2>
+    <p class="meta">Item Code: ${escapeHtml(first['Item Code']||'')} · HSN: ${escapeHtml(first['HSN Code']||'')}</p>
+    <img src="${img}" alt="${escapeHtml(itemCode)}" class="detail-image"/>
+    <p><em>${escapeHtml(first['Specs']||'')}</em></p>
     <table class="data-table">
       <tr>
         <th>Variant</th><th>Description</th>${isAdmin?'<th>Price/Unit</th><th>GST</th>':''}<th>Unit</th><th>MOQ</th><th>Add To Cart</th><th>WhatsApp</th>
@@ -808,11 +855,11 @@ function renderItemDetail(itemCode){
         const priceNum = entry['_price'];
         const priceDisp = entry['Price/Unit']||'';
         return `<tr>
-          <td>${entry['Variant Code']||''}</td>
-          <td>${entry['Description']||''}</td>
-          ${isAdmin?`<td class="num price">${priceDisp}</td><td class="num">${entry['GST']||''}</td>`:''}
-          <td>${entry['Unit']||''}</td>
-          <td>${entry['MOQ']||''}</td>
+          <td>${escapeHtml(entry['Variant Code']||'')}</td>
+          <td>${escapeHtml(entry['Description']||'')}</td>
+          ${isAdmin?`<td class="num price">${escapeHtml(priceDisp)}</td><td class="num">${escapeHtml(entry['GST']||'')}</td>`:''}
+          <td>${escapeHtml(entry['Unit']||'')}</td>
+          <td>${escapeHtml(entry['MOQ']||'')}</td>
           <td><button class="btn-sm btn" onclick="addToCartPrompt('${encodeURIComponent(itemCode)}','${encodeURIComponent(entry['Variant Code']||'')}','${encodeURIComponent(entry['Description']||'')}','${encodeURIComponent(String(priceNum))}','${encodeURIComponent(entry['HSN Code']||'')}','${encodeURIComponent(String(entry['_gst']))}')">Add</button></td>
           <td><a class="wa-link" target="_blank" href="https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent('Hi, I\'m interested in this tool:\nItem: '+(first['Item Name']||'')+'\nVariant Code: '+(entry['Variant Code']||'')+'\nDescription: '+(entry['Description']||'')+(isAdmin?'\nPrice: '+priceDisp:''))}"><i class="fab fa-whatsapp"></i> Chat</a></td>
         </tr>`;
@@ -901,11 +948,11 @@ function performCartSearch(){
   shown.forEach(entry=>{
     const priceNum = entry['_price'];
     html += `<tr>
-      <td>${entry['Item Name']||''}<div class="meta">${entry['Item Code']||''}</div></td>
-      <td>${entry['Variant Code']||''}</td>
-      <td>${entry['Description']||''}</td>
-      ${isAdmin?`<td class="num price">${entry['Price/Unit']||''}</td><td class="num">${entry['GST']||0}%</td>`:''}
-      <td>${entry['Unit']||''}</td>
+      <td>${escapeHtml(entry['Item Name']||'')}<div class="meta">${escapeHtml(entry['Item Code']||'')}</div></td>
+      <td>${escapeHtml(entry['Variant Code']||'')}</td>
+      <td>${escapeHtml(entry['Description']||'')}</td>
+      ${isAdmin?`<td class="num price">${escapeHtml(entry['Price/Unit']||'')}</td><td class="num">${escapeHtml(entry['GST']||0)}%</td>`:''}
+      <td>${escapeHtml(entry['Unit']||'')}</td>
       <td><button class="btn-sm btn" onclick="addToCartPrompt('${encodeURIComponent(entry['Item Code'])}','${encodeURIComponent(entry['Variant Code']||'')}','${encodeURIComponent(entry['Description']||'')}','${encodeURIComponent(String(priceNum))}','${encodeURIComponent(entry['HSN Code']||'')}','${encodeURIComponent(String(entry['_gst']))}')">Add</button></td>
     </tr>`;
   });
@@ -972,10 +1019,10 @@ function renderCart(keepPanelOpen){
       const taxable = Number(c.qty)*Number(c.manualPrice||c.originalPrice||0);
       html += `<tr>
         <td><img src="${img}"/></td>
-        <td>${c.variantCode}</td>
-        <td>${c.itemName||c.itemCode}<div class="meta">${c.description||''}</div></td>
-        <td class="num">${c.hsn||''}</td>
-        <td class="num">${c.gst||0}%</td>
+        <td>${escapeHtml(c.variantCode)}</td>
+        <td>${escapeHtml(c.itemName||c.itemCode)}<div class="meta">${escapeHtml(c.description||'')}</div></td>
+        <td class="num">${escapeHtml(c.hsn||'')}</td>
+        <td class="num">${escapeHtml(c.gst||0)}%</td>
         <td><input type="number" min="1" class="qty-input" value="${c.qty}" onchange="updateCartField(${idx},'qty',this.value)"/></td>
         <td class="num price">${formatINR(c.originalPrice)}</td>
         <td><input type="number" min="0" step="0.01" class="price-input" value="${Number(c.manualPrice).toFixed(2)}" onchange="updateCartField(${idx},'manualPrice',this.value)"/></td>
@@ -998,11 +1045,11 @@ function renderCart(keepPanelOpen){
       const img = c.img || 'https://via.placeholder.com/60?text='+encodeURIComponent(c.itemCode);
       html += `<tr>
         <td><img src="${img}"/></td>
-        <td>${c.variantCode}</td>
-        <td>${c.itemName||c.itemCode}</td>
-        <td>${c.description||''}</td>
+        <td>${escapeHtml(c.variantCode)}</td>
+        <td>${escapeHtml(c.itemName||c.itemCode)}</td>
+        <td>${escapeHtml(c.description||'')}</td>
         <td><input type="number" min="1" class="qty-input" value="${c.qty}" onchange="updateCartField(${idx},'qty',this.value)"/></td>
-        <td>${c.unit||''}</td>
+        <td>${escapeHtml(c.unit||'')}</td>
         <td><button class="remove-x" onclick="removeCartItem(${idx})">✕</button></td>
       </tr>`;
     });
@@ -1124,7 +1171,7 @@ function performSearch(){
   currentCategory = null; currentItemCode = null;
   renderBreadcrumb('search');
   const container = document.getElementById('catalogue');
-  container.innerHTML = `<h2 style="margin-top:14px">Search Results for "${query}"</h2><div class="grid"></div>`;
+  container.innerHTML = `<h2 style="margin-top:14px">Search Results for "${escapeHtml(query)}"</h2><div class="grid"></div>`;
   const grid = container.querySelector('.grid');
   const uniqueItems = [...new Set(currentSearchResults.map(r=>r['Item Code']))];
   if(uniqueItems.length===0){ grid.innerHTML='<p>No results found.</p>'; return; }
@@ -1132,7 +1179,7 @@ function performSearch(){
     const div=document.createElement('div'); div.className='card';
     const img=imageMap[code]||'https://via.placeholder.com/150?text='+encodeURIComponent(code);
     const itemName = allData.find(r=>r['Item Code']===code)?.['Item Name']||'';
-    div.innerHTML = `<img src="${img}" alt="${code}" class="card-image"/><div class="card-title">${itemName||code}</div>`;
+    div.innerHTML = `<img src="${img}" alt="${escapeHtml(code)}" class="card-image"/><div class="card-title">${escapeHtml(itemName||code)}</div>`;
     div.onclick = ()=> renderItemDetail(code);
     grid.appendChild(div);
   });
@@ -1227,12 +1274,12 @@ function performProformaSearch(){
   let html = `<table class="data-table"><tr><th>Item</th><th>Variant</th><th>Description</th><th>Price</th><th>GST</th><th>Unit</th><th></th></tr>`;
   pfSearchMatches.forEach((entry,i)=>{
     html += `<tr>
-      <td>${entry['Item Name']||''}<div class="meta">${entry['Item Code']||''}</div></td>
-      <td>${entry['Variant Code']||''}</td>
-      <td>${entry['Description']||''}</td>
-      <td class="num price">${entry['Price/Unit']||''}</td>
-      <td class="num">${entry['GST']||0}%</td>
-      <td>${entry['Unit']||''}</td>
+      <td>${escapeHtml(entry['Item Name']||'')}<div class="meta">${escapeHtml(entry['Item Code']||'')}</div></td>
+      <td>${escapeHtml(entry['Variant Code']||'')}</td>
+      <td>${escapeHtml(entry['Description']||'')}</td>
+      <td class="num price">${escapeHtml(entry['Price/Unit']||'')}</td>
+      <td class="num">${escapeHtml(entry['GST']||0)}%</td>
+      <td>${escapeHtml(entry['Unit']||'')}</td>
       <td><button class="btn-sm btn" onclick="addProformaItemFromSearch(${i})">Add</button></td>
     </tr>`;
   });
@@ -1287,10 +1334,10 @@ function renderProformaItems(){
     proformaItems.forEach((item,i)=>{
       const c = calcLine(item);
       html += `<tr>
-        <td><input value="${item.hsn}" style="width:80px" onchange="updateProformaField(${i},'hsn',this.value)"/></td>
-        <td><input value="${item.desc}" style="min-width:200px" onchange="updateProformaField(${i},'desc',this.value)"/></td>
+        <td><input value="${escapeHtml(item.hsn)}" style="width:80px" onchange="updateProformaField(${i},'hsn',this.value)"/></td>
+        <td><input value="${escapeHtml(item.desc)}" style="min-width:200px" onchange="updateProformaField(${i},'desc',this.value)"/></td>
         <td><input type="number" min="0" value="${item.qty}" style="width:65px" onchange="updateProformaField(${i},'qty',this.value)"/></td>
-        <td><input value="${item.unit}" style="width:55px" onchange="updateProformaField(${i},'unit',this.value)"/></td>
+        <td><input value="${escapeHtml(item.unit)}" style="width:55px" onchange="updateProformaField(${i},'unit',this.value)"/></td>
         <td><input type="number" min="0" step="0.01" value="${item.unitPrice}" style="width:90px" onchange="updateProformaField(${i},'unitPrice',this.value)"/></td>
         <td><input type="number" min="0" step="0.01" value="${item.gst}" style="width:60px" onchange="updateProformaField(${i},'gst',this.value)"/></td>
         <td class="num price">${formatINR(c.taxable)}</td>
@@ -1397,8 +1444,10 @@ function generateProformaPDF(){
   // Title bar
   doc.setFontSize(13); doc.setFont(undefined,'bold');
   doc.text('PROFORMA INVOICE', PW/2, y+5, {align:'center'});
-  doc.setFontSize(8); doc.setFont(undefined,'normal');
-  doc.text('PAGE 1 of 1', PW-M, y+4, {align:'right'});
+  // The page number ("PAGE n of N") is stamped once at the very end of PDF
+  // generation, after the real page count is known — a placeholder used to
+  // be drawn here too, which sat directly underneath (and visually
+  // overlapped) that later, correct stamp. Removed rather than duplicated.
   y+=8; doc.line(M,y,PW-M,y); y+=2;
 
   const leftW = 95, rightX = M+leftW+2, rightW = CW-leftW-2;
@@ -1411,208 +1460,235 @@ function generateProformaPDF(){
     doc.text(String(value||''),x+1.5,y+7,{maxWidth:w-3});
     doc.setFont(undefined,'normal');
   }
-
+  // Same as field(), but for a row that doesn't start at the box's own top
+  // (rowY is an absolute page position, not an offset from the outer y).
+  function rowField(x,w,label,value,rowY,fs=8){
+    doc.setFontSize(6.5); doc.setTextColor(90,113,132); doc.setFont(undefined,'normal');
+    doc.text(label,x+1.5,rowY+3);
+    doc.setFontSize(fs); doc.setTextColor(22,35,46); doc.setFont(undefined,'bold');
+    doc.text(String(value||''),x+1.5,rowY+7,{maxWidth:w-3});
+    doc.setFont(undefined,'normal');
+  }
+  // Compact label+value pair used for the cells in the third (right-hand)
+  // column of the shipment-terms grid. Value sits inline after the label
+  // (same line) instead of stacked below it, so each field only needs one
+  // text line's worth of height — two of these stack into one row.
+  function compactField(x,w,label,value,rowY,subH=5){
+    const cy = rowY + subH/2 + 1.4;
+    doc.setFontSize(6.3); doc.setTextColor(90,113,132); doc.setFont(undefined,'normal');
+    const lbl = label+':';
+    doc.text(lbl, x+1.5, cy);
+    const lw = doc.getTextWidth(lbl);
+    doc.setFontSize(7.6); doc.setTextColor(22,35,46); doc.setFont(undefined,'bold');
+    doc.text(String(value||''), x+1.5+lw+1.5, cy, {maxWidth:w-3-lw-1.5});
+    doc.setFont(undefined,'normal');
+  }
   // ---- Row: Consignor | Invoice info ----
-  const topH=42;
+  // Height is set to what the content actually needs (7 address/contact
+  // lines, tightened line spacing) instead of a fixed oversized box, so
+  // there's no leftover blank space below the GST No. line.
+  const topH=36;
   box(M,leftW,topH);
   doc.setFontSize(6.5); doc.setTextColor(90,113,132); doc.text('CONSIGNOR',M+1.5,y+4);
   doc.setFontSize(9); doc.setTextColor(22,35,46); doc.setFont(undefined,'bold');
   doc.text(INVOICE_CO.name, M+1.5, y+9, {maxWidth:leftW-3});
   doc.setFont(undefined,'normal'); doc.setFontSize(7.8);
-  doc.text([INVOICE_CO.addr1, INVOICE_CO.addr2, INVOICE_CO.addr3, 'Mobile: '+INVOICE_CO.mobile, INVOICE_CO.website, INVOICE_CO.email, 'GST NO - '+INVOICE_CO.gst], M+1.5, y+14, {lineHeightFactor:1.35});
+  doc.text([INVOICE_CO.addr1, INVOICE_CO.addr2, INVOICE_CO.addr3, 'Mobile: '+INVOICE_CO.mobile, INVOICE_CO.website, INVOICE_CO.email, 'GST NO - '+INVOICE_CO.gst], M+1.5, y+13, {lineHeightFactor:1.2});
 
   box(rightX,rightW,topH);
   const c1=rightX, c1w=rightW*0.42, c2=rightX+c1w, c2w=rightW*0.28, c3=rightX+c1w+c2w, c3w=rightW-c1w-c2w;
-  doc.line(c2,y,c2,y+16); doc.line(c3,y,c3,y+16);
+  doc.line(c2,y,c2,y+10); doc.line(c3,y,c3,y+10);
   field(c1,c1w,'PROFORMA INVOICE NO.', document.getElementById('pf-no').value);
   field(c2,c2w,'DATE', fmtDate(document.getElementById('pf-date').value));
   field(c3,c3w,'IEC', document.getElementById('pf-iec').value);
-  doc.line(rightX,y+16,rightX+rightW,y+16);
+  doc.line(rightX,y+10,rightX+rightW,y+10);
   const orderVal = [document.getElementById('pf-order-no').value, document.getElementById('pf-order-date').value?('DT. '+fmtDate(document.getElementById('pf-order-date').value)):''].filter(Boolean).join(' ');
-  doc.setFontSize(6.5); doc.setTextColor(90,113,132); doc.text("BUYER'S ORDER NO. & DATE",rightX+1.5,y+19.5);
-  doc.setFontSize(8); doc.setTextColor(22,35,46); doc.text(orderVal, rightX+1.5, y+23,{maxWidth:rightW-3});
-  doc.line(rightX,y+25,rightX+rightW,y+25);
-  doc.setFontSize(6.5); doc.setTextColor(90,113,132); doc.text('BANK DETAIL',rightX+1.5,y+28.5);
+  doc.setFontSize(6.5); doc.setTextColor(90,113,132); doc.text("BUYER'S ORDER NO. & DATE",rightX+1.5,y+13.5);
+  doc.setFontSize(8); doc.setTextColor(22,35,46); doc.text(orderVal, rightX+1.5, y+17.5,{maxWidth:rightW-3});
+  doc.line(rightX,y+19,rightX+rightW,y+19);
+  doc.setFontSize(6.5); doc.setTextColor(90,113,132); doc.text('BANK DETAIL',rightX+1.5,y+22.5);
   doc.setFontSize(7); doc.setTextColor(22,35,46);
-  doc.text('Name of Bank: '+BANK.bank+'      Branch: '+BANK.branch, rightX+1.5, y+32);
-  doc.text('A/c Holder: '+BANK.holder, rightX+1.5, y+35.5,{maxWidth:rightW-3});
-  doc.text('A/c No: '+BANK.account+'   IFSC: '+BANK.ifsc+(BANK.swift?'   SWIFT: '+BANK.swift:''), rightX+1.5, y+39);
+  doc.text('Name of Bank: '+BANK.bank+'      Branch: '+BANK.branch, rightX+1.5, y+26);
+  doc.text('A/c Holder: '+BANK.holder, rightX+1.5, y+29.5,{maxWidth:rightW-3});
+  doc.text('A/c No: '+BANK.account+'   IFSC: '+BANK.ifsc+(BANK.swift?'   SWIFT: '+BANK.swift:''), rightX+1.5, y+33);
   y+=topH;
 
-  // ---- Row: Consignee | Country of Dispatch/Destination ----
-  const cH=30;
-  box(M,leftW,cH);
-  doc.setFontSize(6.5); doc.setTextColor(90,113,132); doc.text('CONSIGNEE',M+1.5,y+4);
-  doc.setFontSize(9); doc.setTextColor(22,35,46); doc.setFont(undefined,'bold');
-  doc.text(document.getElementById('pf-buyer-name').value||'', M+1.5, y+9,{maxWidth:leftW-3});
+  // ---- Row: Consignee | Notify Party + Country of Dispatch/Destination ----
+  // Consignee address is capped to 3 lines and Notify Party to 4 lines, so
+  // neither block can grow unbounded. The left (Consignee) and right
+  // (Notify Party + Country) columns are then sized to their OWN content
+  // instead of being forced to a shared, taller height — that mismatch was
+  // what left a slab of dead white space under the shorter column. The two
+  // columns start at the same y but can end at different y's; the
+  // shipment-terms grid below tracks each column's own bottom, so the
+  // FOB/SEA-AIR-ROAD/etc. fields sit directly under Country of
+  // Dispatch/Destination with no gap, and the Pre Carriage/Vessel/Port
+  // Discharge fields sit directly under Consignee with no gap either.
+  const consLineH = 7.8*0.3528*1.35; // mm per line — loosened again; box height
+  // grows by only ~2mm to accommodate this, which is negligible
   doc.setFont(undefined,'normal'); doc.setFontSize(7.8);
   const stSel = document.getElementById('pf-buyer-state');
   const stName = stSel.value==='__OUTSIDE_INDIA__' ? 'Outside India' : stSel.value;
-  doc.text([
-    document.getElementById('pf-buyer-address').value||'',
+  const addressLines = doc.splitTextToSize(document.getElementById('pf-buyer-address').value||'', leftW-3).slice(0,3); // max 3 lines
+  const consigneeLines = [
+    ...addressLines,
     stName||'',
     'PAN: '+(document.getElementById('pf-buyer-pan').value||'')+'   EXIM: '+(document.getElementById('pf-buyer-exim').value||''),
     'Phone: '+(document.getElementById('pf-buyer-phone').value||''),
     'GST No: '+(document.getElementById('pf-buyer-gst').value||'')
-  ], M+1.5, y+13,{lineHeightFactor:1.3});
+  ];
+  const consigneeH = 13 + consigneeLines.length*consLineH + 1.2;
 
-  box(rightX,rightW,cH);
   const halfW=rightW/2;
-  doc.line(rightX+halfW,y,rightX+halfW,y+10);
-  field(rightX,halfW,'COUNTRY OF DISPATCH', document.getElementById('pf-country-dispatch').value);
-  field(rightX+halfW,halfW,'COUNTRY OF FINAL DESTINATION', document.getElementById('pf-country-dest').value);
-  y+=cH;
+  const notifyLineH = 7.8*0.3528*1.15;
+  const notifyLines = doc.splitTextToSize(document.getElementById('pf-notify').value||'', rightW-3).slice(0,4); // max 4 lines
+  const notifyBlockH = 4 + 4*notifyLineH + 2; // fixed, holds up to 4 lines regardless of actual length
+  const countryRowH = 10;
+  const notifyH = notifyBlockH + countryRowH;
 
-  // ---- Row: Pre Carriage / Place of Receipt / Incoterm ----
-  y = fieldRow3(doc,M,CW,y,10,
-    ['PRE CARRIAGE BY','PLACE OF RECEIPT BY PRE CARRIER','FOB / C&F / CIF / CFR'],
-    [document.getElementById('pf-pre-carriage').value, document.getElementById('pf-place-receipt').value, document.getElementById('pf-incoterm').value]);
+  const leftBoxH = Math.max(26, consigneeH);
+  const rightBoxH = Math.max(26, notifyH);
+  const rowTopY = y;
 
-  // ---- Row: Vessel / Port of Loading / Currency / Payment terms ----
-  y = fieldRow(doc,M,CW,y,10,
-    [['VESSEL / FLIGHT NO.',document.getElementById('pf-vessel').value],
-     ['PORT OF LOADING',document.getElementById('pf-port-loading').value],
-     ['CURRENCY OF INVOICE',document.getElementById('pf-currency').value],
-     ['PAYMENT TERMS',document.getElementById('pf-payment-terms').value]]);
+  box(M,leftW,leftBoxH);
+  doc.setFontSize(6.5); doc.setTextColor(90,113,132); doc.text('BILL TO',M+1.5,y+4);
+  doc.setFontSize(9); doc.setTextColor(22,35,46); doc.setFont(undefined,'bold');
+  doc.text(document.getElementById('pf-buyer-name').value||'', M+1.5, y+9,{maxWidth:leftW-3});
+  doc.setFont(undefined,'normal'); doc.setFontSize(7.8);
+  doc.text(consigneeLines, M+1.5, y+13,{lineHeightFactor:1.35});
 
-  // ---- Row: Port of Discharge / Destination / Shipment of Goods / Brand ----
-  y = fieldRow(doc,M,CW,y,10,
-    [['PORT OF DISCHARGE',document.getElementById('pf-port-discharge').value],
-     ['DESTINATION',document.getElementById('pf-destination').value],
-     ['SHIPMENT OF GOODS',document.getElementById('pf-shipment-goods').value],
-     ['BRAND NAME',document.getElementById('pf-brand').value]]);
+  doc.rect(rightX,rowTopY,rightW,rightBoxH);
+  doc.setFontSize(6.5); doc.setTextColor(90,113,132); doc.text('NOTIFY PARTY', rightX+1.5, rowTopY+4);
+  doc.setFontSize(7.8); doc.setTextColor(22,35,46); doc.setFont(undefined,'bold');
+  doc.text(notifyLines, rightX+1.5, rowTopY+7, {lineHeightFactor:1.15});
+  doc.setFont(undefined,'normal');
+  const countryY = rowTopY + notifyBlockH;
+  doc.line(rightX, countryY, rightX+rightW, countryY);
+  doc.line(rightX+halfW, countryY, rightX+halfW, countryY+countryRowH);
+  rowField(rightX,halfW,'COUNTRY OF DISPATCH', document.getElementById('pf-country-dispatch').value, countryY);
+  rowField(rightX+halfW,halfW,'COUNTRY OF FINAL DESTINATION', document.getElementById('pf-country-dest').value, countryY);
 
-  y+=3;
+  // ---- Rows: shipment-terms grid ----
+  // Left column (Pre Carriage/Place of Receipt, Vessel/Port of Loading,
+  // Port of Discharge/Destination) continues immediately below Consignee;
+  // right column (Incoterm/mode, currency/payment terms, goods/brand, as
+  // compact stacked pairs) continues immediately below Country of
+  // Dispatch/Destination. Each column keeps its own running y so neither
+  // one waits on the other.
+  // Left grid rows hold ONE label+value per row; right grid rows stack TWO
+  // inline label+value pairs. leftBoxH (Consignee) and rightBoxH (Notify +
+  // Country) are rarely equal — Consignee's address/PAN/phone/GST block is
+  // usually taller — so fixing both grids to the same row height just
+  // shifted the mismatch down into the grid instead of fixing it. Instead,
+  // size the right grid's row height so its own column (rightBoxH + 3
+  // rows) finishes exactly where the left column (leftBoxH + 3 rows) does.
+  const gRowHNarrow = 10;
+  const leftColumnGridTotal = 3*gRowHNarrow;
+  const gRowHWide = Math.max(9, (leftBoxH + leftColumnGridTotal - rightBoxH)/3);
+  function leftGridRow(rowY,h,labelA,valA,labelB,valB){
+    const halfL = leftW/2;
+    doc.rect(M,rowY,halfL,h);
+    doc.rect(M+halfL,rowY,halfL,h);
+    rowField(M,halfL,labelA,valA,rowY);
+    rowField(M+halfL,halfL,labelB,valB,rowY);
+    return rowY+h;
+  }
+  function rightGridRow(rowY,h,labelC1,valC1,labelC2,valC2){
+    doc.rect(rightX,rowY,rightW,h);
+    const subH = h/2;
+    compactField(rightX,rightW,labelC1,valC1,rowY,subH);
+    doc.line(rightX,rowY+subH,rightX+rightW,rowY+subH);
+    compactField(rightX,rightW,labelC2,valC2,rowY+subH,subH);
+    return rowY+h;
+  }
 
-  // ---- Line items table (paginated: per-page-only subtotals on every page
-  // except the last, and a Brought-Down (B/D) row carrying forward the
-  // running Total Units / Taxable Amount / Total Amount at the top of every
-  // continuation page). The grand total block further below still sums
-  // ALL items, unchanged. ----
+  let ly = rowTopY + leftBoxH;
+  ly = leftGridRow(ly,gRowHNarrow,
+    'PRE CARRIAGE BY',document.getElementById('pf-pre-carriage').value,
+    'PLACE OF RECEIPT BY PRE CARRIER',document.getElementById('pf-place-receipt').value);
+  ly = leftGridRow(ly,gRowHNarrow,
+    'VESSEL / FLIGHT NO.',document.getElementById('pf-vessel').value,
+    'PORT OF LOADING',document.getElementById('pf-port-loading').value);
+  ly = leftGridRow(ly,gRowHNarrow,
+    'PORT OF DISCHARGE',document.getElementById('pf-port-discharge').value,
+    'DESTINATION',document.getElementById('pf-destination').value);
+
+  let ry = rowTopY + rightBoxH;
+  ry = rightGridRow(ry,gRowHWide,
+    'FOB / C&F / CIF / CFR',document.getElementById('pf-incoterm').value,
+    'SEA / AIR / ROAD',document.getElementById('pf-mode').value);
+  ry = rightGridRow(ry,gRowHWide,
+    'CURRENCY OF INVOICE',document.getElementById('pf-currency').value,
+    'PAYMENT TERMS',document.getElementById('pf-payment-terms').value);
+  ry = rightGridRow(ry,gRowHWide,
+    'SHIPMENT OF GOODS',document.getElementById('pf-shipment-goods').value,
+    'BRAND NAME',document.getElementById('pf-brand').value);
+
+  y = Math.max(ly, ry) + 3;
+
+  // ---- Line items table ----
   const t = proformaTotals();
-  const PF_COL_STYLES = {
-    0:{cellWidth:9,halign:'center'}, 1:{cellWidth:17}, 2:{cellWidth:56},
-    3:{cellWidth:14,halign:'center'}, 4:{cellWidth:19,halign:'right'}, 5:{cellWidth:22,halign:'right'},
-    6:{cellWidth:11,halign:'center'}, 7:{cellWidth:11,halign:'center'}, 8:{cellWidth:11,halign:'center'},
-    9:{cellWidth:24,halign:'right'}
-  };
-  const PF_HEAD = [['Sr.','HSN','Variant, Item & Description','Total Units','Unit Price','Taxable Amt','CGST','SGST','IGST','Total Amount']];
-  const PF_STYLES = { fontSize:7, cellPadding:2, lineColor:[90,113,132], lineWidth:0.1, overflow:'linebreak' };
-  const PF_HEAD_STYLES = { fillColor:[231,236,240], textColor:[11,42,69], fontStyle:'bold', fontSize:7 };
-
-  const pageHeight = doc.internal.pageSize.getHeight();
-  const PF_HEAD_H = 12, PF_BD_H = 9, PF_BOTTOM_MARGIN = 10, PF_SUBTOTAL_H = 34, PF_FINAL_FOOTER_H = 78;
-
-  // Estimate each item row's printed height (used only to decide page breaks),
-  // based on how many lines the HSN / Description text will wrap to at these
-  // column widths, matching the fontSize/cellPadding used by the real table.
-  doc.setFontSize(7); doc.setFont(undefined,'normal');
-  function pfEstimateRowHeight(item){
-    const lineH = 7*0.3527*1.15;
-    const hsnLines = doc.splitTextToSize(String(item.hsn||''), PF_COL_STYLES[1].cellWidth-3).length;
-    const descLines = doc.splitTextToSize(String(item.desc||''), PF_COL_STYLES[2].cellWidth-3).length;
-    const lines = Math.max(1, hsnLines, descLines);
-    return 4 + lines*lineH;
-  }
-  const rowHeights = proformaItems.map(pfEstimateRowHeight);
-
-  // ---- Pass 1: greedily fill pages, reserving room for a small per-page subtotal ----
-  const chunkPlans = [];
-  { let idx=0;
-    while(idx < proformaItems.length){
-      const isCont = chunkPlans.length>0;
-      const startY = isCont ? PDF_TOP_GAP : y;
-      const avail = pageHeight - startY - PF_HEAD_H - PF_BOTTOM_MARGIN - PF_SUBTOTAL_H - (isCont?PF_BD_H:0);
-      let used=0, items=[], startIdx=idx;
-      while(idx < proformaItems.length){
-        const h = rowHeights[idx];
-        if(used+h > avail && items.length>0) break;
-        used += h; items.push(proformaItems[idx]); idx++;
-      }
-      chunkPlans.push({ items, startIdx, startY, isCont });
-    }
-  }
-  // ---- Pass 2: the LAST page needs room for the full totals/words/declaration/
-  // transport/signature block (much taller than the small per-page subtotal),
-  // so push items off the end of the last chunk onto a fresh page until what
-  // remains actually fits. ----
-  function pfChunkHeight(chunk){
-    let h = chunk.startY + PF_HEAD_H + (chunk.isCont?PF_BD_H:0);
-    chunk.items.forEach((_,i)=> h += rowHeights[chunk.startIdx+i]);
-    return h;
-  }
-  while(chunkPlans.length){
-    const last = chunkPlans[chunkPlans.length-1];
-    if(last.items.length===0) break;
-    const remaining = pageHeight - PF_BOTTOM_MARGIN - pfChunkHeight(last);
-    if(remaining >= PF_FINAL_FOOTER_H) break;
-    const movedItem = last.items.pop();
-    const movedIdx = last.startIdx + last.items.length;
-    chunkPlans.push({ items:[movedItem], startIdx:movedIdx, startY:PDF_TOP_GAP, isCont:true });
-  }
-
-  // Drop any chunk that ended up with zero items (can happen in the rare
-  // edge case where pass 2 has to move every item off a page) so we never
-  // render a blank page.
-  const finalChunks = chunkPlans.filter(c=>c.items.length>0);
-
-  // ---- Render each page's chunk ----
-  let cumQty=0, cumTaxable=0, cumTotal=0, globalIdx=0;
-  finalChunks.forEach((chunk,ci)=>{
-    if(ci>0) doc.addPage();
-    const bodyRows = [];
-    if(chunk.isCont){
-      bodyRows.push([
-        { content:'B/D', styles:{fontStyle:'italic'} }, '',
-        { content:'Brought Down from previous page', styles:{fontStyle:'italic'} },
-        String(cumQty), '', formatINRPdf(cumTaxable), '', '', '', formatINRPdf(cumTotal)
-      ]);
-    }
-    chunk.items.forEach(item=>{
-      globalIdx++;
-      const c = calcLine(item);
-      bodyRows.push([ globalIdx, item.hsn, item.desc, `${item.qty} ${item.unit}`, formatINRPdf(item.unitPrice),
-        formatINRPdf(c.taxable), formatPct(c.cgstPct,c.cgstApplicable), formatPct(c.sgstPct,c.sgstApplicable), formatPct(c.igstPct,c.igstApplicable), formatINRPdf(c.total) ]);
-    });
-    doc.autoTable({
-      startY: chunk.startY, margin:{left:M,right:M,top:PDF_TOP_GAP,bottom:16},
-      head: PF_HEAD, body: bodyRows, theme:'grid',
-      styles: PF_STYLES, headStyles: PF_HEAD_STYLES, columnStyles: PF_COL_STYLES,
-      didParseCell:function(data){
-        if(data.section==='body' && data.row.index===0 && chunk.isCont){
-          data.cell.styles.fillColor=[247,240,225]; data.cell.styles.textColor=[90,113,132];
-        }
-      }
-    });
-
-    const pageTotals = chunk.items.reduce((acc,item)=>{
-      const c=calcLine(item);
-      acc.taxable+=c.taxable; acc.cgst+=c.cgst; acc.sgst+=c.sgst; acc.igst+=c.igst; acc.total+=c.total;
-      return acc;
-    },{taxable:0,cgst:0,sgst:0,igst:0,total:0});
-    const isLast = ci===finalChunks.length-1;
-
-    if(!isLast){
-      // Per-page-only subtotal — NOT the running/grand total — carried
-      // forward via the B/D row at the top of the next page instead.
-      doc.autoTable({
-        startY: doc.lastAutoTable.finalY, margin:{left:M,right:M},
-        body:[
-          [{content:'Total Taxable Amount (this page)', colSpan:9, styles:{halign:'right'}}, formatINRPdf(pageTotals.taxable)],
-          [{content:'CGST Amount (this page)', colSpan:9, styles:{halign:'right'}}, formatINRPdf(pageTotals.cgst)],
-          [{content:'SGST Amount (this page)', colSpan:9, styles:{halign:'right'}}, formatINRPdf(pageTotals.sgst)],
-          [{content:'IGST Amount (this page)', colSpan:9, styles:{halign:'right'}}, formatINRPdf(pageTotals.igst)],
-          [{content:'Total Amount Carried Forward (C/F)', colSpan:9, styles:{halign:'right',fontStyle:'bold'}}, {content:formatINRPdf(pageTotals.total), styles:{fontStyle:'bold'}}],
-        ],
-        theme:'grid', styles:{ fontSize:7, cellPadding:{top:0.8,right:2,bottom:0.8,left:2}, lineColor:[90,113,132], lineWidth:0.1 },
-        columnStyles: PF_COL_STYLES,
-        didParseCell:function(data){ data.cell.styles.fillColor=[231,236,240]; if(data.column.index===9){ data.cell.styles.textColor=[11,42,69]; } }
-      });
-      cumQty += chunk.items.reduce((s,it)=>s+(Number(it.qty)||0),0);
-      cumTaxable += pageTotals.taxable; cumTotal += pageTotals.total;
-    }
-    y = doc.lastAutoTable.finalY + 2;
+  const body = proformaItems.map((item,i)=>{
+    const c = calcLine(item);
+    return [i+1, item.hsn, item.desc, `${item.qty} ${item.unit}`, formatINRPdf(item.unitPrice),
+      formatINRPdf(c.taxable), formatPct(c.cgstPct, c.cgstApplicable), formatPct(c.sgstPct, c.sgstApplicable), formatPct(c.igstPct, c.igstApplicable), formatINRPdf(c.total)];
   });
+  // Sr./HSN/Unit Price widened so short numeric/currency values ("10",
+  // "82041110", "Rs. 36.00") no longer wrap onto multiple lines within
+  // their own column. The extra width is taken from the auto-sized
+  // description column rather than from the other money columns.
+  const PF_COL_STYLES = {0:{cellWidth:9,halign:'center'},1:{cellWidth:17},2:{cellWidth:'auto'},3:{cellWidth:14,halign:'center'},4:{cellWidth:19,halign:'right'},5:{cellWidth:22,halign:'right'},6:{cellWidth:11,halign:'center'},7:{cellWidth:11,halign:'center'},8:{cellWidth:11,halign:'center'},9:{cellWidth:24,halign:'right'}};
+  const itemTableStartPage = doc.internal.getNumberOfPages();
+  doc.autoTable({
+    startY:y, margin:{left:M,right:M,top:PDF_TOP_GAP,bottom:16},
+    head:[['Sr.','HSN','Variant, Item & Description','Total Units','Unit Price','Taxable Amt','CGST','SGST','IGST','Total Amount']],
+    body,
+    theme:'grid',
+    styles:{ fontSize:7, cellPadding:2, lineColor:[90,113,132], lineWidth:0.1, overflow:'linebreak' },
+    headStyles:{ fillColor:[231,236,240], textColor:[11,42,69], fontStyle:'bold', fontSize:7 },
+    columnStyles: PF_COL_STYLES
+    // NOTE: deliberately no `foot` here. jspdf-autotable repeats a `foot`
+    // block on every page the table spans, which is why the Total
+    // Taxable/CGST/SGST/IGST amounts used to show up — identically — on
+    // every intermediate page. Those figures are only meaningful once, after
+    // the very last line item, so they're now drawn manually below instead.
+  });
+  y = doc.lastAutoTable.finalY+2;
+
+  // Stamp every page the item table spilled onto — except the one it
+  // actually finished on — with a "Continued on next page..." note, since
+  // the real subtotal is shown only once, right after the last line item.
+  const itemTableEndPage = doc.internal.getNumberOfPages();
+  for(let p=itemTableStartPage; p<itemTableEndPage; p++){
+    doc.setPage(p);
+    const pageHeight = doc.internal.pageSize.getHeight();
+    doc.setFontSize(7.5); doc.setFont(undefined,'italic'); doc.setTextColor(90,113,132);
+    doc.text('Continued on next page...', PW-M, pageHeight-6, {align:'right'});
+    doc.setFont(undefined,'normal');
+  }
+  doc.setPage(itemTableEndPage);
+
+  // ---- Grand totals (Taxable / CGST / SGST / IGST) — shown once, directly
+  // under the last row of the item table, using the sum across ALL items
+  // regardless of how many pages the table above spanned. ----
+  y = ensureSpace(doc, y, 26);
+  doc.autoTable({
+    startY:y, margin:{left:M,right:M,top:PDF_TOP_GAP,bottom:16},
+    body:[
+      [{content:'Total Taxable Amount', colSpan:9, styles:{halign:'right'}}, formatINRPdf(t.taxable)],
+      [{content:'CGST Amount', colSpan:9, styles:{halign:'right'}}, formatINRPdf(t.cgst)],
+      [{content:'SGST Amount', colSpan:9, styles:{halign:'right'}}, formatINRPdf(t.sgst)],
+      [{content:'IGST Amount', colSpan:9, styles:{halign:'right'}}, formatINRPdf(t.igst)],
+    ],
+    theme:'grid',
+    styles:{ fontSize:7, cellPadding:{top:0.8,right:2,bottom:0.8,left:2}, lineColor:[90,113,132], lineWidth:0.15, fontStyle:'bold', textColor:[11,42,69] },
+    columnStyles: PF_COL_STYLES,
+    didParseCell:function(data){
+      data.cell.styles.fillColor = [231,236,240];
+      if(data.column.index===9){ data.cell.styles.textColor=[11,42,69]; data.cell.styles.fontStyle='bold'; }
+    }
+  });
+  y = doc.lastAutoTable.finalY+2;
 
   // Everything below here is drawn manually (not by autoTable) so it needs its
   // own page-break checks — otherwise a long item list pushes this content
