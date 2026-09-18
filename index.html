@@ -560,9 +560,23 @@ let pfSearchMatches = []; // last set of catalogue search results shown in the P
 
 /* ================= DATA LOAD ================= */
 function cleanPrice(raw){ if(!raw) return 0; const n = parseFloat(String(raw).replace(/[^0-9.]/g,'')); return isNaN(n)?0:n; }
-function cleanGST(raw){ if(!raw) return 0; const n = parseFloat(String(raw).replace(/[^0-9.]/g,'')); return isNaN(n)?0:n; }
+// Returns GST as a PERCENTAGE number (18 for 18%). The Prices sheet hands back percent-formatted
+// cells as fractions (0.18), so any plain value between 0 and 1 is converted (0.18 -> 18). A value
+// written with a "%" sign (e.g. "18%" or "0.5%") is taken as already being a percentage.
+function cleanGST(raw){
+  if(raw===null||raw===undefined||raw==='') return 0;
+  const hasPct = typeof raw==='string' && raw.indexOf('%')!==-1;
+  let n = parseFloat(String(raw).replace(/[^0-9.]/g,''));
+  if(isNaN(n)) return 0;
+  if(!hasPct && n>0 && n<1) n = n*100;
+  return Math.round(n*100)/100;
+}
 function formatINR(n){ return '₹'+(Number(n)||0).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2}); }
 // jsPDF's built-in fonts don't have the ₹ glyph (it prints as a broken character), so PDFs use "Rs." instead.
+// Admin-only display helpers for the Products / search tables. Both return '' until the row has been
+// matched to the private Prices sheet (entry._priced), so a genuine 0% GST still shows as "0%".
+function priceDisplay(entry){ return entry['_priced'] ? formatINR(entry['_price']) : ''; }
+function gstDisplay(entry){ return entry['_priced'] ? formatPct(entry['_gst']) : ''; }
 function formatINRPdf(n){ return 'Rs. '+(Number(n)||0).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2}); }
 // applicable=false means this tax type doesn't apply to this shipment at all (e.g. IGST on an
 // intra-state sale, or any GST on an export) so we show "-"; applicable=true means the tax type
@@ -659,6 +673,7 @@ async function fetchAdminPrices(){
         r['_gst'] = cleanGST(match.gst);
         r['Price/Unit'] = match.price;
         r['GST'] = match.gst;
+        r['_priced'] = true;
       }
     });
     applyRoleUI();
@@ -716,7 +731,7 @@ function logoutAdmin(){
   role='customer'; adminUsername=''; adminToken='';
   // Wipe cached price/GST figures from memory along with the session — they
   // were only ever populated for this admin session and shouldn't linger.
-  allData.forEach(r=>{ r['_price']=0; r['_gst']=0; delete r['Price/Unit']; delete r['GST']; });
+  allData.forEach(r=>{ r['_price']=0; r['_gst']=0; r['_priced']=false; delete r['Price/Unit']; delete r['GST']; });
   sessionStorage.setItem('sni_role','customer'); sessionStorage.removeItem('sni_admin_user');
   sessionStorage.removeItem('sni_admin_token');
   applyRoleUI(); showSection('home');
@@ -853,14 +868,15 @@ function renderItemDetail(itemCode){
       </tr>
       ${unique.map(entry=>{
         const priceNum = entry['_price'];
+        const priceDisp = priceDisplay(entry);
         return `<tr>
           <td>${escapeHtml(entry['Variant Code']||'')}</td>
           <td>${escapeHtml(entry['Description']||'')}</td>
-          ${isAdmin?`<td class="num price">${formatINR(priceNum)}</td><td class="num">${formatGstPct(entry['_gst'])}</td>`:''}
+          ${isAdmin?`<td class="num price">${escapeHtml(priceDisp)}</td><td class="num">${escapeHtml(gstDisplay(entry))}</td>`:''}
           <td>${escapeHtml(entry['Unit']||'')}</td>
           <td>${escapeHtml(entry['MOQ']||'')}</td>
           <td><button class="btn-sm btn" onclick="addToCartPrompt('${encodeURIComponent(itemCode)}','${encodeURIComponent(entry['Variant Code']||'')}','${encodeURIComponent(entry['Description']||'')}','${encodeURIComponent(String(priceNum))}','${encodeURIComponent(entry['HSN Code']||'')}','${encodeURIComponent(String(entry['_gst']))}')">Add</button></td>
-          <td><a class="wa-link" target="_blank" href="https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent('Hi, I\'m interested in this tool:\nItem: '+(first['Item Name']||'')+'\nVariant Code: '+(entry['Variant Code']||'')+'\nDescription: '+(entry['Description']||'')+(isAdmin?'\nPrice: '+formatINR(priceNum):''))}"><i class="fab fa-whatsapp"></i> Chat</a></td>
+          <td><a class="wa-link" target="_blank" href="https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent('Hi, I\'m interested in this tool:\nItem: '+(first['Item Name']||'')+'\nVariant Code: '+(entry['Variant Code']||'')+'\nDescription: '+(entry['Description']||'')+(isAdmin?'\nPrice: '+priceDisp:''))}"><i class="fab fa-whatsapp"></i> Chat</a></td>
         </tr>`;
       }).join('')}
     </table>
@@ -950,7 +966,7 @@ function performCartSearch(){
       <td>${escapeHtml(entry['Item Name']||'')}<div class="meta">${escapeHtml(entry['Item Code']||'')}</div></td>
       <td>${escapeHtml(entry['Variant Code']||'')}</td>
       <td>${escapeHtml(entry['Description']||'')}</td>
-      ${isAdmin?`<td class="num price">${escapeHtml(entry['Price/Unit']||'')}</td><td class="num">${escapeHtml(entry['GST']||0)}%</td>`:''}
+      ${isAdmin?`<td class="num price">${escapeHtml(priceDisplay(entry))}</td><td class="num">${escapeHtml(gstDisplay(entry))}</td>`:''}
       <td>${escapeHtml(entry['Unit']||'')}</td>
       <td><button class="btn-sm btn" onclick="addToCartPrompt('${encodeURIComponent(entry['Item Code'])}','${encodeURIComponent(entry['Variant Code']||'')}','${encodeURIComponent(entry['Description']||'')}','${encodeURIComponent(String(priceNum))}','${encodeURIComponent(entry['HSN Code']||'')}','${encodeURIComponent(String(entry['_gst']))}')">Add</button></td>
     </tr>`;
@@ -1276,8 +1292,8 @@ function performProformaSearch(){
       <td>${escapeHtml(entry['Item Name']||'')}<div class="meta">${escapeHtml(entry['Item Code']||'')}</div></td>
       <td>${escapeHtml(entry['Variant Code']||'')}</td>
       <td>${escapeHtml(entry['Description']||'')}</td>
-      <td class="num price">${escapeHtml(entry['Price/Unit']||'')}</td>
-      <td class="num">${escapeHtml(entry['GST']||0)}%</td>
+      <td class="num price">${escapeHtml(priceDisplay(entry))}</td>
+      <td class="num">${escapeHtml(gstDisplay(entry))}</td>
       <td>${escapeHtml(entry['Unit']||'')}</td>
       <td><button class="btn-sm btn" onclick="addProformaItemFromSearch(${i})">Add</button></td>
     </tr>`;
